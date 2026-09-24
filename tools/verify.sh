@@ -8,6 +8,8 @@
 #                 before a host has to find out. A shader that will not
 #                 compile presents to an operator as "the mixer does
 #                 nothing", with the real message buried in the log.
+#   demo          the browser demo's copy of both shaders is still the
+#                 plugin's, character for character
 #   build         a fresh universal Release build, which is what ships
 #   suites        the plugin's claims, measured at TWO rasters: two inputs
 #                 at two sizes with two MaxUVs, both inputs bitwise at rest
@@ -146,6 +148,28 @@ if shaders_compile; then
 	pass "every shader compiles"
 else
 	fail "a shader does not compile"
+fi
+
+#---------------------------------------------------------------------------
+# The browser demo's copy of the same GLSL.
+#
+# `demo/plugin.js` cannot include a C++ file, so it carries its own copy of
+# both shaders. This compares the two character for character -- reformatting
+# counts, deliberately, because "it is only whitespace" is how a real change
+# gets waved through. It says nothing about the demo's PORT of the CPU half
+# (the coil, the schedule, the raster mapping, the re-lock, the crosstalk
+# filter); only a reader can check that.
+#---------------------------------------------------------------------------
+step "demo: the browser copy of the shaders"
+if [ -f demo/tools/check_shaders.py ]; then
+	if python3 demo/tools/check_shaders.py >/tmp/relay-demo-shaders.log 2>&1; then
+		pass "$( tail -1 /tmp/relay-demo-shaders.log )"
+	else
+		fail "the demo's shaders have drifted -- see /tmp/relay-demo-shaders.log"
+		tail -12 /tmp/relay-demo-shaders.log
+	fi
+else
+	printf '   skipped: no demo/\n'
 fi
 
 #---------------------------------------------------------------------------

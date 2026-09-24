@@ -315,7 +315,8 @@ at 4K. As genlock found, a tenth of a millisecond is close to what a
   it.
 - **The hero image** is the harness's render, not Resolume's.
 - The About block is generated now (`sync-about.py`), with the User guide
-  button: 22 parameters, 17 swept. No presets, no OpenFX port.
+  button: 22 parameters, 17 swept. No presets, no OpenFX port. The browser demo
+  exists and is a port, not the plugin; see *The browser demo* below.
 
 ---
 
@@ -386,6 +387,110 @@ the plugin's own diag log, which since bba55b5 logs one line per switch.
    button (`ParamEvent`), and a REST press reaches the plugin as a press**
    (above). Still open: whether a click in the panel sends the release, since
    over REST a second press 1.5 s later was not counted.
+
+---
+
+## The browser demo
+
+**<https://relay-demo.stoatworks-labs.com>**, served from `demo/` by this repo's
+own Worker (`wrangler.toml`). Built 2026-09-24 on the shared kit
+(`stoatworks-backend/resolume-demo`, vendored into `demo/vendor/`), wipe's
+two-input arrangement, the suite's second mixer with a demo.
+
+**What runs for real.** The plugin's two shaders, `kVertexShader` and
+`kRelayShader`, spliced into `demo/plugin.js` from `source/Shaders.cpp` by
+script, unedited, and compiled by the kit's `port()` (the version line and
+precision qualifiers, nothing else) into WebGL2. Every uniform `ProcessOpenGL`
+sets is set by the page, `SizeA`/`SizeB`/`OutSize` through `glUniform2i` and
+`Cuts` through `glUniform3fv` as the plugin does. `demo/tools/check_shaders.py`
+compares the copies with the C++ character for character and `tools/verify.sh`
+runs it.
+
+**What is a port, checked by nobody but a reader.** `demo/model.js` is
+Controls.cpp (every `...FromParam`, applied to float32-rounded values as the
+plugin's floats are), Raster.cpp (both standards, `CutAt`, `LineOfRow`,
+`ScanTime`), Model.cpp (`Coil`, `BounceSchedule` with the half-closed dwell,
+the one-line floor and the 48-cycle cap, `RelockResponse` in all three damping
+regimes, `RelockSlowestRate`, `MakeCrossFilter`, `CrossResponse`) and the
+constants Relay.cpp keeps in its anonymous namespace (the settle threshold, the
+tear). `demo/plugin.js` carries `ProcessOpenGL`'s frame logic — the coil, the
+operate time, the Anywhere / Vertical Interval firing rule, a switch during a
+switch, the schedule turned into this frame's starting state and cuts, the roll
+and the tear, the crosstalk filter — and `SetFloatParameter`'s Take latch. A
+run of the port in Node against the numbers the README's harness table
+records: the 2 ms / e 0.6 PAL schedule has **16 events** and lasts **4.860 ms**
+after the make against the closed form's 5.000; the default loop's first zero
+crossing is at **0.1145 s** and its log decrement **1.571**; the 4 K corner
+floor is **0.735 MHz**; the coil pulls in at 0.75 and drops at 0.25 with
+Pull-in 0.725 / Drop-out 0.275. That is the port agreeing with the harness's
+published results, not a C++-vs-JS comparison of the same frame: none exists.
+
+**Decisions taken without asking:**
+
+- **Two inputs from one kit**, as wipe did. A (the layer below,
+  `inputTextures[0]`) is the kit's clip, relabelled `Clip A` and the only one
+  "Use my own…" replaces. B (this layer) is a second `SourceRenderer` from the
+  kit's own `sources.js`, at the same raster and on the same clock, picked by
+  the kit's one extra transport dropdown (`demo.variants`, labelled `Clip B`).
+  B is transport, not a parameter the plugin declares, so it is not in the
+  inspector. Defaults: A colour bars, B the geometry card.
+- **Opacity is a slider**, in the Coil group where the plugin declares it, with
+  the plugin's default of 1. In Arena it is the layer's opacity fader and the
+  mixer's own control is overridden; the banner and the disclosure say so.
+- **Standard is shown**, although Arena hides a mixer's parameter 0: a browser
+  does not, and hiding it would be inventing a host behaviour. NTSC is
+  therefore reachable on the page and not in Arena; the disclosure says so.
+- **Take is a toggle the renderer releases.** FF_TYPE_EVENT; the kit has no
+  event type (toolpath's and flyback's answer). The toggle going to 1 is the
+  press; the renderer flips the latch once and sets it back to 0, which is the
+  host's release. The latch logic is `SetFloatParameter`'s, ported.
+- **"Hold switching frame" is a transport checkbox, not a parameter.** When
+  on, the page pauses its own clock (the kit's `state.playing`, the same thing
+  the Pause button does) on the first frame a bounce schedule cuts into, so a
+  frame the plugin shows for one host frame can be looked at. Step walks on
+  from there; Play resumes; the next switch holds again. The plugin has no
+  such thing and the disclosure says so.
+- **The clock is the page's**, in seconds, handed to the frame logic as
+  `now`. The plugin's unit voting and epoch are host plumbing and are not
+  exercised. Restart puts the page's clock back to zero, which a host never
+  does; the port then resets itself as a freshly created instance (a clock
+  going backwards has no other honest reading). Disclosed.
+- **Both MaxUVs are 1**: the page's textures are unpadded, so the per-input
+  MaxUV the `--mixer` check exists for has nothing to correct here. Disclosed.
+- **Alpha is not shown.** Output alpha is the selected input's, as the plugin
+  decides; the page's canvas draws over black, so a cut between the
+  transparent clip and an opaque one is not visible as a cut of alpha.
+  Disclosed rather than adding a backdrop the kit only offers to effects.
+- **A statistics line under the picture** reports what the port decided for
+  the frame: the coil, a pending operate time, the schedule (cycles, its
+  length against the closed form), how many cuts fall in this frame and where
+  the first lands, the roll, the crosstalk filter's taps. The plugin draws no
+  such thing.
+- **Presets are the page's.** The plugin declares none (a decision above);
+  each is only a combination of the plugin's own parameters.
+- **Absent:** the About block; the harness's `Fault` uniform is 0 as shipped.
+  Relay has no audio path, so nothing is missing for want of one.
+- **The host is a Worker route, not a custom domain.** stoatworks-labs.com
+  reached Cloudflare's 100 Workers custom domains on 2026-09-24, so
+  `relay-demo` is a proxied AAAA `100::` record made through the API plus a
+  `[[routes]]` entry in `wrangler.toml`, as slowscan's and teletext's are.
+  Deleting the record takes the page dark while deploys stay green.
+
+**Verified 2026-09-24** headlessly (Chrome + SwiftShader through
+`stoatworks-backend/release/cdpshot.py`'s Chrome class) on the local server
+and again on the live host: no console errors or exceptions (SwiftShader's
+"GPU stall due to ReadPixels" performance notes come from the screenshot
+capture); the 17 parameters in the plugin's order and five groups; Opacity
+1 → 0.1 with the hold on pauses on a frame that starts on B with **10 cuts
+from line 125 of 288**, reads 14 horizontal band edges and 47 near-black rows
+in the canvas, and differs from the settled frame by a mean 47 levels; Take at
+Bounce 4 ms / e 0.81 holds a frame with 5 cuts (20 cycles over 24.74 ms) that
+differs from the 1 ms frame by 92 levels; Step shows the next frame with 38
+cuts from line 14; the Take toggle reads Off again; Crosstalk 0.5 changes the
+settled picture; embed mode drops the banner and keeps the hidden statement.
+Deploy with `cf-run npx wrangler deploy` from the repo root, or push to main:
+`.github/workflows/deploy.yml` (wipe's, renamed) deploys `demo/` and checks the
+live `<head>` is this build.
 
 ---
 

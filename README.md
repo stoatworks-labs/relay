@@ -65,6 +65,13 @@ bounce, nowhere.
 **It is a mixer, not an effect.** It needs a layer below it: that layer is A,
 and the clip on this layer is B, which the energised coil selects.
 
+**[Try it in your browser](https://relay-demo.stoatworks-labs.com)** — the
+plugin's own shader in WebGL2 with its coil, bounce schedule, raster mapping,
+re-lock and crosstalk filter ported to JavaScript, switching between two
+generated clips. A port, not the plugin: the page lists everything it does
+not reproduce, starting with the fact that in Resolume the coil voltage is the
+layer's opacity fader.
+
 ## The controls
 
 **Raster** — Standard (PAL or NTSC: the line period and the active line count
@@ -187,7 +194,8 @@ model, and nothing measures it. The dwell fraction of a bounce (half of each
 interval closed) and the approach flight (as long as the first bounce) are
 model constants, not measurements of any relay. There is a
 [user guide](https://stoatworks-labs.com/software/relay/guide/); no presets and
-no OpenFX port.
+no OpenFX port. The [browser demo](https://relay-demo.stoatworks-labs.com)
+is a port of the plugin, not the plugin.
 
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, and the traps.
