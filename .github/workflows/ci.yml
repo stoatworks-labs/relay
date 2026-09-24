@@ -1,0 +1,97 @@
+name: ci
+
+# Both platforms on every push and pull request, so a Dependabot bump has a
+# status check to gate on and a GLEW-shaped break -- which macOS is
+# structurally blind to, because macOS never links GLEW -- is caught before a
+# tag. There is no Linux job: the CMakeLists branches on APPLE and WIN32, and
+# Resolume has no Linux build.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The FFGL SDK is a submodule. Without this CMake fails at configure
+          # time with a missing-directory error that reads like a broken repo.
+          submodules: recursive
+
+      - name: Configure
+        # arm64 only, unlike the release build's universal arm64;x86_64 -- the
+        # second slice doubles the build for no extra signal, because a source
+        # break is not architecture-specific.
+        #
+        # RELAY_BUILD_TOOLS is ON here where the release build turns it OFF:
+        # rltest is where the two inputs, the bounce bands, the re-lock and
+        # the crosstalk are actually measured, so compiling and running it is
+        # most of the value.
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES=arm64
+          -DRELAY_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: The suites
+        # The runner has no GPU, so everything but --names runs on Apple's
+        # software renderer. Its interpolated uv is good only to the GL
+        # spec's 1 part in 10^5 (wipe's --area failed here on exactly that),
+        # so every tolerance in rltest is derived with that allowance, and
+        # tools/verify.sh runs the same suites on the same renderer locally
+        # with RLTEST_RENDERER=software: a check that would fail here fails
+        # there first.
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Controls
+        # At 320x180, because the runner has no GPU and the question is only
+        # whether a control changed ANY subpixel. Two at a time on a
+        # three-core runner; graticule learned that an eight-wide pool at
+        # 320x180 was still going at twenty minutes. Seventeen controls here
+        # against rosette's forty-four, so it should be comfortable.
+        timeout-minutes: 25
+        run: python3 tools/sweep.py --size 320x180 --jobs 2
+
+      # Uploading is not only for the artefact. This repo has no package
+      # manifest, so github-actions is its only Dependabot ecosystem -- and a
+      # bump to actions/upload-artifact otherwise touches release.yml alone,
+      # a workflow no pull request ever runs.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-macos-arm64
+          path: build/*.bundle
+          if-no-files-found: error
+
+  windows:
+    name: Windows
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        # The toolchain path MUST stay double-quoted: a `run:` step on Windows
+        # is PowerShell, and unquoted this expands to nothing.
+        run: >
+          cmake -B build -A x64
+          -DCMAKE_BUILD_TYPE=Release
+          -DRELAY_BUILD_TOOLS=OFF
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-windows-x86_64
+          path: build/Release/*.dll
+          if-no-files-found: error
