@@ -1,12 +1,10 @@
 # Attributions
 
-Relay is built on other people's work. This file lists what that work is, who
-did it, and what it is doing here.
+Relay is built on other people's work. This file lists what that work is, who did
+it, and what it is doing here.
 
-It is a PROVISIONAL hand copy (2026-09-24), adapted from wipe's. The master
-lists live in the `stoatworks-backend` repo and are pushed out by
-`scripts/sync-attributions.py` when the plugin is registered in the fleet; that
-sync overwrites this file.
+It is generated — the master lists live in the `stoatworks-backend` repo and are
+pushed out by `scripts/sync-attributions.py`. Edit it there, not here.
 
 ## Code we derived from other people's work
 
@@ -14,7 +12,7 @@ Someone else solved this first, and this project would not exist in its current 
 
 ### Mixer mechanics, two-input harness and Timing — Stoatworks genlock and wipe
 
-<https://github.com/stoatworks-labs/genlock>, <https://github.com/stoatworks-labs/wipe>  
+<https://github.com/stoatworks-labs/genlock>  
 Licence: MIT  
 Copyright: Stoatworks Labs
 
@@ -54,9 +52,9 @@ Libraries, SDKs and frameworks the project is built on or bundles.
 Licence: BSD-3-Clause  
 Copyright: FreeFrame
 
-Vendored as a git submodule at external/ffgl.
+Vendored as a git submodule at external/ffgl (third_party/ffgl in oxbow).
 
-The plugin ABI itself. An FFGL effect, source or mixer is defined by this SDK's headers — there is no other way to be loadable by Resolume Arena and Avenue.
+The plugin ABI itself. An FFGL effect or source is defined by this SDK's headers — there is no other way to be loadable by Resolume Arena and Avenue.
 
 ### GLEW — the OpenGL Extension Wrangler Library
 
@@ -84,7 +82,7 @@ What this set out to be. No code, assets or binaries from any of these were used
 
 ### Relay-switched video routers
 
-Implemented from the textbook behaviour of an electromechanical relay — coil hysteresis, operate time, contact bounce decaying by a coefficient of restitution — and of a monitor's vertical and horizontal PLLs as second- and first-order loops, applied to a raster scanned in real time. No particular router, relay datasheet, monitor or captured output was used; the look is a model, not a characterisation of anybody's equipment.
+Implemented from the textbook behaviour of an electromechanical relay (coil hysteresis, operate time, contact bounce decaying by a coefficient of restitution) and of a monitor's vertical and horizontal PLLs as second- and first-order loops, applied to a raster scanned in real time. No particular router, relay datasheet, monitor or captured output was used; the look is a model, not a characterisation of anybody's equipment.
 
 ## Getting this wrong
 
