@@ -28,7 +28,17 @@ of the picture was scanned while the relay was still on A; the black bands are
 the open contact in flight; the picture below each is B, arriving — and
 rolled, because the monitor has not pulled B's field phase in yet.</sub>
 
-VIDEO-BLOCK
+[![Relay — an A/B cut made by a relay, bounce and all, for Resolume](docs/video-thumb.png)](https://www.youtube.com/watch?v=NRwl0iCd7_g)
+
+*[Watch it](https://www.youtube.com/watch?v=NRwl0iCd7_g) — 53 seconds:
+the fader up past Pull-in and the cut to B with its roll, the switching frame
+held so the bands of A, black and B can be read, the fader down past Drop-out,
+a longer livelier bounce, an underdamped re-lock, genlocked vertical-interval
+cuts, and crosstalk with three Take presses. Every frame is the real plugin's
+output: an FFGL plugin has no window, so the footage is rendered by this
+repository's own offline harness (`rltest --pipe`, driven by a cue sheet)
+rather than filmed off a screen, the clips are Resolume's bundled demo media,
+and the two held frames are stills of frames the plugin rendered.*
 
 ## A relay is a coil, an armature and two contacts
 
