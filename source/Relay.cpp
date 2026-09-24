@@ -268,6 +268,13 @@ FFResult Relay::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 		target    = wanted;
 		pending   = true;
 		readyTime = now + operate;
+		//One line per switch, so a host session's log shows what drove
+		//the coil: the fader, Select or Take. A show cuts a few times a
+		//minute at most, and this is the only evidence a host gives.
+		diag::info( std::string( "switch to " ) + ( wanted == kContactB ? "B" : "A" )
+		            + ( coilOn ? " (coil on, Opacity " : " (coil off, Opacity " )
+		            + std::to_string( params[ PT_OPACITY ] ) + ( params[ PT_SELECT ] > 0.5f ? ", Select on" : "" )
+		            + ( takeLatch ? ", Take latched)" : ")" ) );
 	}
 
 	//-----------------------------------------------------------------
