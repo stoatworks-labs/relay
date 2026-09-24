@@ -11,9 +11,10 @@
 > way down, **41 of 41 frames bitwise**; the re-lock following the second-order
 > step response to **0.002 rows** over 150 frames with the log decrement and the
 > zero crossing read off the picture; the crosstalk doubling per octave to
-> **0.013** (see [Status](#status)). It has **never been loaded into Resolume**.
-> It is the fleet's third FFGL *mixer*, built to what the first two, genlock and
-> wipe, measured in Arena. Check it in your own rig before trusting it in a show.
+> **0.013** (see [Status](#status)). It has **never been loaded into Resolume on
+> macOS**; on Windows it has run in Resolume Arena 7.27.1, on software rendering,
+> as a layer's Blend Mode. It is the fleet's third FFGL *mixer*, after genlock and
+> wipe. Check it in your own rig before trusting it in a show.
 
 An A/B cut made by a relay — bounce and all — as an FFGL **mixer** for
 [Resolume](https://resolume.com) Arena and Avenue.
@@ -26,6 +27,8 @@ by `rltest`, the offline harness, not captured from Resolume. The upper part
 of the picture was scanned while the relay was still on A; the black bands are
 the open contact in flight; the picture below each is B, arriving — and
 rolled, because the monitor has not pulled B's field phase in yet.</sub>
+
+VIDEO-BLOCK
 
 ## A relay is a coil, an armature and two contacts
 
@@ -157,7 +160,7 @@ and on Apple's software renderer:
 | Crosstalk | corner 1 MHz (52 cycles/width at PAL): at 2, 4, 8, 16 and 32 cycles/width the leak is the stated filter's to **1.6e-7 relative**, either input leaking; 2→4→8 cycles doubles per octave to within **0.0106** of 2 (the stated filter's own departure is 0.0119); Crosstalk 0 is bitwise |
 | Mutation | one character of the shipped GLSL — the line mapping dividing by the width instead of the height — fails **3** `--bounce` assertions; the shipped text through the same hook passes and renders the default path's bytes. By hand: `uv.x >= c.y` → `<=` fails **12** `--bounce` assertions and nothing else |
 | Negative controls | every one fails its check: shared MaxUV (4 assertions), no hysteresis, bounce in frames (2), first-order loop (4), flat leak (3), Anywhere at 9.7 ms leaving A at the top |
-| No dead controls | all **17** sweepable of the 21 parameters change the picture at 480×270; the other four are the About block |
+| No dead controls | all **17** sweepable of the 22 parameters change the picture at 480×270; the other five are the About block |
 | Pipe | 3 frames in, 3 out; Opacity ramps and Select steps between cues; a closed stdout is **exit 1** |
 | macOS binary | universal (`x86_64 arm64`), exports `plugMain`, ad-hoc signs |
 | Host metadata | `oxbow probe` reads **SW Relay / RL01 / mixer / inputs 2..2**, parameter 0 **Standard** |
@@ -166,16 +169,25 @@ and on Apple's software renderer:
 Run `tools/verify.sh` before believing any of it.
 
 **Not done, and the list is honest.** Relay has **never been loaded into
-Resolume** on either platform. What it is built to — Extra Effects, a layer's
-Blend Mode, both inputs padded, `SetTime` every frame in milliseconds,
-`Opacity` bound to the layer's fader, the first parameter hidden — was measured
-on genlock and wipe in Arena 7.27.1 and not re-measured on Relay. CI has never
-run and the Windows DLL has never been compiled. Nothing has run on a **GPU
-other than this Mac's** or on llvmpipe. The line PLL's tear is a look, not a
+Resolume on macOS**. On Windows a CI build was probed by hand in **Resolume Arena 7.27.1** (win-lab,
+Mesa llvmpipe, 2026-09-24) over REST and read back from the plugin's own log: it
+loads from Extra Effects, is offered in every layer's Blend Mode list and in the
+transition list, initialises cleanly, hides exactly one parameter (**Standard,
+index 0**: 21 of 22 shown), binds `Opacity` to the layer's opacity fader (the log
+shows the coil switching at the fader's 0.2, 0.85, 0.2 and 1.0, and a write to the
+mixer's own Opacity is overridden), shows `Take` as a button that the log sees as
+a latched press, and **a layer transition drives `Opacity`**: with SW Relay as the
+transition blend mode and a 2 s duration, a clip trigger produced switches at
+0.71, 0.05 and 0.71. No picture of the mixer's output in Resolume was captured. That both inputs arrive padded and that
+`SetTime` counts milliseconds is still inherited from genlock and wipe, not
+re-measured on Relay. CI runs both platforms and the Windows DLL compiled first
+time; the harness has never run on a **GPU other than this Mac's** or on
+llvmpipe. The line PLL's tear is a look, not a
 model, and nothing measures it. The dwell fraction of a bounce (half of each
 interval closed) and the approach flight (as long as the first bounce) are
-model constants, not measurements of any relay. There is **no user guide**, no
-presets, no OpenFX port and no browser demo.
+model constants, not measurements of any relay. There is a
+[user guide](https://stoatworks-labs.com/software/relay/guide/); no presets and
+no OpenFX port.
 
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, and the traps.

@@ -5,8 +5,10 @@ between this layer and the layer below the way a relay-switched router did:
 with hysteresis on the coil, bounce on the contacts, a monitor that has to
 re-lock, and a capacitor's worth of crosstalk. C++17 + GLSL 4.10, CMake,
 universal macOS `.bundle` and a Windows `.dll`. MIT. Intended home
-`github.com/stoatworks-labs/relay`. Local v0.1.0, 2026-09-24, **never loaded
-into Resolume**. The fleet's third mixer, after genlock and wipe.
+`github.com/stoatworks-labs/relay`, released v0.1.0 2026-09-24. Never loaded
+into Resolume on macOS; probed by hand in Arena 7.27.1 on Windows the same day
+(see "What Relay showed in Arena"). The fleet's third mixer, after genlock
+and wipe.
 
 `CLAUDE.md` is the command reference. This file is the *why*: the idea, every
 number in the harness and where it comes from, the traps this build actually
@@ -295,16 +297,12 @@ at 4K. As genlock found, a tenth of a millisecond is close to what a
 
 **Assumed, or not yet done:**
 
-- **Never loaded into Resolume**, on either platform. The mixer facts it is
-  built to — Extra Effects, Blend Mode, category 2, padded inputs, `SetTime`
-  every frame in ms, `Opacity` bound to the layer's fader, parameter 0
-  hidden — were measured on genlock and wipe in Arena 7.27.1 (Windows) and
-  are inherited, not re-measured. Whether the layer's transition or autopilot
-  drives `Opacity` — which for a relay is the interesting case, a slow fade
-  producing one cut — is still open from genlock.
-- **CI has never run** and the Windows DLL has never been compiled. The
-  workflows are wipe's, renamed. `M_PI` is not used (`kPi`), `<cmath>` is
-  included where `std::lround` is, and `near`/`far` are not identifiers.
+- **Never loaded into Resolume on macOS.** On Windows it was probed by hand in
+  Arena 7.27.1 (below). Padded inputs and `SetTime` in ms are still inherited
+  from genlock and wipe, not re-measured on Relay.
+- **CI runs both platforms**; the Windows DLL compiled first time on MSVC
+  (`kPi`, `<cmath>`, no `near`/`far`, no GLSL 4.10 reserved word as an
+  identifier — all four checked before the first push).
 - **Two rasterisers, not all.** Nothing has run on llvmpipe or another GPU.
 - **The dwell fraction, the approach flight, the tear and the settle
   threshold are model constants**, argued above and measured against
@@ -316,27 +314,78 @@ at 4K. As genlock found, a tenth of a millisecond is close to what a
   break and replaces the rest. Not measured by a check; the sweep never does
   it.
 - **The hero image** is the harness's render, not Resolume's.
-- No user guide (`guide=""` in `StoatworksAbout.h`, so the About block has no
-  User guide button), no presets, no OpenFX port, no browser demo.
+- The About block is generated now (`sync-about.py`), with the User guide
+  button: 22 parameters, 17 swept. No presets, no OpenFX port.
 
 ---
 
+## What Relay showed in Arena
+
+A CI build of v0.1.0 in **Resolume Arena 7.27.1** (build 15990) on win-lab —
+Windows x64, Mesa llvmpipe, no GPU — on 2026-09-24. The fleet's Arena gate
+cannot gate a mixer, so it was probed by hand over Arena's REST API (wipe's
+recipe: a still on layer 2, SW Relay as layer 3's Blend Mode) and read back from
+the plugin's own diag log, which since bba55b5 logs one line per switch.
+
+- **Loads from Extra Effects.** Arena's log shows `Created Relay mixer`; the
+  diag log shows `initialised` on `Mesa llvmpipe ... 4.5 (Core Profile)` and
+  `host=Resolume Arena version=7.27.1 15990 loaded from C:\Users\lab\Documents\Resolume Arena\Extra Effects\Relay.dll`.
+  No error lines in either log.
+- **Offered in the Blend Mode list and in the transition list**, both under
+  `SW Relay`.
+- **Index 0 is hidden, and it is Standard.** The mixer panel (REST) exposes 21
+  of the 22 declared parameters; the missing one is Standard. Third mixer to
+  show Arena hiding a mixer's first parameter, after genlock and wipe.
+- **`Opacity` is the layer's opacity fader — answered, with the plugin's own
+  log.** With a clip connected on the layer, setting the layer's opacity to
+  0.2, 0.85, 0.2 and 1.0 read back as the mixer's `Opacity`, and the diag log
+  recorded `switch to A (coil off, Opacity 0.200000)`, `switch to B (coil on,
+  Opacity 0.850000)`, A at 0.2, B at 1.0. A REST write of 0.15 to the mixer's
+  own `Opacity` was overridden (read back 1.0, the layer's).
+- **No instance exists until the layer has a clip.** With no clip connected on
+  layer 3, the mixer's `Opacity` did not follow the layer fader over REST and
+  accepted a write of 0.2 — nothing was rendering, so nothing was bound. A
+  first probe read that as "not bound" until the clip was added. Any mixer
+  probe must connect a clip on the mixer's own layer first.
+- **`Take` is shown as a button** (`ParamEvent`, like the About buttons). A
+  REST press logged `switch to A (coil on, Opacity 1.000000, Take latched)`;
+  a second press 1.5 s later logged nothing, and later switches still said
+  `Take latched`, so over REST Arena sent the press and no release (a held
+  Take counts once, by design). Whether a click in Arena's panel sends the
+  release is not established. `Select` on and off switched B then A, logged
+  with `Select on`.
+- **A layer transition drives `Opacity` — answered, open since genlock.** With
+  SW Relay as layer 3's *transition* blend mode and duration 2 s, connecting a
+  second clip produced `switch to B (coil on, Opacity 0.711614)`, `switch to A
+  (coil off, Opacity 0.050988)` and `switch to B (coil on, Opacity 0.709958)`:
+  the transition ramps the mixer's `Opacity` through the relay, one cut at
+  Pull-in per fade. The transition's own instances are separate from the
+  layer's (two `Created Relay mixer` lines). The autopilot was not tried, but it
+  triggers clips, which is the transition case.
+- **Not established:** no frame of the mixer's output was captured (Arena's
+  REST does not serve a mixer's picture), so a correct render in Resolume is
+  not claimed. Padded inputs and `SetTime` in milliseconds are still inherited
+  from genlock and wipe.
+
 ## Open questions
 
-1. **Does the layer's transition or autopilot move `Opacity`?** Open since
-   genlock. A relay under a slow fade is the case that matters: one cut at
-   Pull-in on the way up, one at Drop-out on the way down, nothing in between.
+1. ~~Does the layer's transition or autopilot move `Opacity`?~~ **The
+   transition does — answered on Relay 2026-09-24** (above): a 2 s transition
+   produced one cut at Pull-in on the way up and one at Drop-out on the way
+   down. The autopilot triggers clips, which is that case; not separately tried.
 2. **Should the release time differ from the operate time?** Real relays
    release faster than they operate. One control was chosen; a second is a
    parameter away.
 3. **Should the bounce dwell be a control?** It is the difference between
    bands of B during the bounce and none. A constant for now.
-4. **NTSC is unreachable in Arena** because it is at index 0. If Arena's
-   hiding of the first parameter is ever explained (or a dummy first parameter
-   proven to work), Standard could move.
-5. **What does Arena do with an event parameter on a mixer?** `Take` is an
-   `FF_TYPE_EVENT`; whether Arena's mixer panel shows it as a button and sends
-   1 then 0 is assumed from effects.
+4. **NTSC is unreachable in Arena** because it is at index 0 — confirmed on
+   Relay itself (Standard is the one hidden parameter). If Arena's hiding of
+   the first parameter is ever explained (or a dummy first parameter proven to
+   work), Standard could move.
+5. ~~What does Arena do with an event parameter on a mixer?~~ **Shown as a
+   button (`ParamEvent`), and a REST press reaches the plugin as a press**
+   (above). Still open: whether a click in the panel sends the release, since
+   over REST a second press 1.5 s later was not counted.
 
 ---
 
