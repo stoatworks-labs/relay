@@ -51,8 +51,8 @@ and the two held frames are stills of frames the plugin rendered.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .dmg disk image | [`relay-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/relay/releases/download/v0.1.0/relay-0.1.0-macos-universal.dmg) | 197 KB |
-| Universal (Apple Silicon + Intel) · .zip archive | [`relay-macos-universal.zip`](https://github.com/stoatworks-labs/relay/releases/latest/download/relay-macos-universal.zip) | 154 KB |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`relay-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/relay/releases/download/v0.1.0/relay-0.1.0-macos-universal.dmg) | 208 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`relay-macos-universal.zip`](https://github.com/stoatworks-labs/relay/releases/latest/download/relay-macos-universal.zip) | 170 KB |
 
 </details>
 
@@ -68,7 +68,7 @@ and the two held frames are stills of frames the plugin rendered.*
 
 All builds, checksums and release notes: [github.com/stoatworks-labs/relay/releases](https://github.com/stoatworks-labs/relay/releases).
 
-The Windows builds are unsigned, so SmartScreen warns once.
+macOS builds are signed and notarised and open normally. The Windows builds are unsigned, so SmartScreen warns once.
 
 <!-- downloads:end -->
 
