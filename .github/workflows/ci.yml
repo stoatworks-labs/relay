@@ -63,7 +63,7 @@ jobs:
       # manifest, so github-actions is its only Dependabot ecosystem -- and a
       # bump to actions/upload-artifact otherwise touches release.yml alone,
       # a workflow no pull request ever runs.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: relay-macos-arm64
           path: build/*.bundle
@@ -90,7 +90,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: relay-windows-x86_64
           path: build/Release/*.dll
