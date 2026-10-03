@@ -138,4 +138,74 @@ frame::Plan PlanAt( const CoilRecord& coilSeconds, double now, double fps, const
 frame::Plan PlanFromCurve( const std::function< double( double ) >& transitionAt, double beginFrames, double nowFrames,
                            double fps, const HostValues& host, int outputWidth );
 
+//---------------------------------------------------------------------------
+// What only a transition has: a default for where in it the relay pulls in,
+// and an end. The FFGL mixer has neither.
+//---------------------------------------------------------------------------
+
+/**
+    Pull-in's default in the OpenFX build: half way, where a centred
+    transition has its edit point. The FFGL build's 0.7 is a fader position
+    -- the coil pulls in high on the way up -- and on a timeline it put the
+    cut 70% of the way through, which left the re-lock 0.3 of the transition
+    to settle in. In DaVinci Resolve 21.1 a 24-frame transition at 24 fps was
+    still rolling on its last frame (6.4% of the picture not yet SourceTo) and
+    popped to clean SourceTo on the next. At 0.5 the relay switches at the
+    edit point and has half the transition to settle; End (below) takes care
+    of what is left.
+*/
+inline constexpr float kPullInDefault = 0.5f;
+
+/**
+    The transition's end. The re-lock at the defaults is still visible about
+    0.7 s after the switch -- longer than the half of a one-second transition
+    it gets -- and when the transition is over the host shows SourceTo itself.
+    So, as lenticular's and pilot's transitions do:
+
+      Fade  (the default) over the last End Length of the transition the
+            relay's picture crossfades -- a smoothstep, in premultiplied
+            colour -- to exactly SourceTo.
+      Cut   no fade: the relay to the last frame, as the first OpenFX build
+            had it, bit for bit.
+
+    Only the end: the start of a transition is the relay at rest on
+    SourceFrom already.
+*/
+enum class Ends : int
+{
+	Fade = 0,
+	Cut  = 1,
+};
+
+inline constexpr float kEndLengthDefault = 0.15f;
+inline constexpr float kEndLengthMax     = 0.5f;
+
+/**
+	The progress the end is judged at: the progress ONE FRAME ON, while the
+	curve is rising. A host's last frame of a transition need not reach 1 --
+	Resolve's 24-frame transition switched on frame 17 at Pull-in 0.7, which
+	fits a progress of k / 24 or ( k + 0.5 ) / 24 and not k / 23, so its last
+	frame is short of 1 -- and judged at the frame's own progress the fade
+	would leave up to a fifth of the relay on the last frame and pop on the
+	next. One frame on, the last frame is exactly
+	SourceTo whether the host's progress reaches 1 on it or only after it.
+	`previous` is the progress a frame earlier; on a falling, flat or unread
+	curve the progress is taken as it is.
+*/
+double EndProgress( double progress, double previous );
+
+/**
+	How much of the relay's picture is seen against clean SourceTo at
+	`progress`: 1 under Cut and before the last End Length; over it a
+	smoothstep of ( 1 - progress ) / End Length, with zero slope at both ends
+	of the ramp; 0 from progress 1 on. End Length is clamped to 0..0.5. An
+	unread progress (NaN) shows the relay.
+*/
+float RelayStrength( double progress, Ends ends, double endLength );
+
+/// The end's crossfade over rows [ rowBegin, rowEnd ) of two pictures the
+/// same size (RGBA float): out = to x ( 1 - strength ) + out x strength. At
+/// strength 0 or below `out` becomes exactly `to`.
+void FadeToRows( const float* to, float* out, int width, int rowBegin, int rowEnd, float strength );
+
 } // namespace relay::transition

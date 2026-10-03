@@ -252,4 +252,42 @@ frame::Plan PlanFromCurve( const std::function< double( double ) >& transitionAt
 	return PlanAt( coil, nowFrames / rate, rate, settings, outputWidth );
 }
 
+double EndProgress( double progress, double previous )
+{
+	if( std::isfinite( progress ) && std::isfinite( previous ) && progress > previous )
+		return progress + ( progress - previous );
+	return progress;
+}
+
+float RelayStrength( double progress, Ends ends, double endLength )
+{
+	if( ends == Ends::Cut || std::isnan( progress ) )
+		return 1.0f;
+
+	const double edge = 1.0 - std::clamp( progress, 0.0, 1.0 );
+	if( edge <= 0.0 )
+		return 0.0f;//exactly SourceTo, whatever the length
+
+	const double length = std::clamp( endLength, 0.0, static_cast< double >( kEndLengthMax ) );
+	if( edge >= length )
+		return 1.0f;//the relay alone (and everywhere short of the end at length 0)
+
+	//Smoothstep: 0 and 1 at the ends of the ramp, with zero slope at both.
+	const double x = edge / length;
+	return static_cast< float >( x * x * ( 3.0 - 2.0 * x ) );
+}
+
+void FadeToRows( const float* to, float* out, int width, int rowBegin, int rowEnd, float strength )
+{
+	const size_t begin = static_cast< size_t >( std::max( rowBegin, 0 ) ) * width * 4;
+	const size_t end   = static_cast< size_t >( std::max( rowEnd, rowBegin ) ) * width * 4;
+	if( strength <= 0.0f )
+	{
+		std::copy( to + begin, to + end, out + begin );
+		return;
+	}
+	for( size_t i = begin; i < end; ++i )
+		out[ i ] = to[ i ] * ( 1.0f - strength ) + out[ i ] * strength;
+}
+
 } // namespace relay::transition

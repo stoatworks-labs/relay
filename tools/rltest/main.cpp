@@ -2147,12 +2147,82 @@ void curveChecks()
 	}
 }
 
+/// The transition's end: the OpenFX build's own, with no FFGL counterpart,
+/// so checked against its definition.
+void endChecks()
+{
+	using relay::transition::Ends;
+	using relay::transition::EndProgress;
+	using relay::transition::RelayStrength;
+	const double L = relay::transition::kEndLengthDefault;
+
+	Check( RelayStrength( 0.0, Ends::Cut, L ) == 1.0f && RelayStrength( 1.0, Ends::Cut, L ) == 1.0f
+	           && RelayStrength( 2.0, Ends::Cut, L ) == 1.0f,
+	       "Ends Cut: the relay to the very end, whatever the progress" );
+	Check( RelayStrength( 1.0 - L, Ends::Fade, L ) == 1.0f && RelayStrength( 0.3, Ends::Fade, L ) == 1.0f,
+	       fmt( "Ends Fade: the relay alone up to progress 1 - End Length (%.2f)", 1.0 - L ) );
+	Check( RelayStrength( 1.0, Ends::Fade, L ) == 0.0f && RelayStrength( 1.2, Ends::Fade, L ) == 0.0f,
+	       "Ends Fade: exactly SourceTo from progress 1" );
+	Check( std::fabs( RelayStrength( 1.0 - 0.5 * L, Ends::Fade, L ) - 0.5f ) < 1e-6f,
+	       fmt( "Ends Fade: half way down the ramp, half the relay (%.6f)", RelayStrength( 1.0 - 0.5 * L, Ends::Fade, L ) ) );
+	bool monotone  = true;
+	float previous = 1.0f;
+	for( int i = 0; i <= 1000; ++i )
+	{
+		const float s = RelayStrength( 0.8 + 0.2 * i / 1000.0, Ends::Fade, L );
+		if( s > previous )
+			monotone = false;
+		previous = s;
+	}
+	//Smoothstep's slope at the ends of the ramp is zero: a step of 1e-4 in
+	//progress moves the strength by 3 ( 1e-4 / L )^2 = 1.3e-6 at either end.
+	const float nearTop    = 1.0f - RelayStrength( 1.0 - L + 1e-4, Ends::Fade, L );
+	const float nearBottom = RelayStrength( 1.0 - 1e-4, Ends::Fade, L );
+	Check( monotone && nearTop < 1e-5f && nearBottom < 1e-5f,
+	       fmt( "Ends Fade: falls monotonically, flat at both ends of the ramp (%.2e, %.2e)", nearTop, nearBottom ) );
+	Check( RelayStrength( 0.99, Ends::Fade, 0.0 ) == 1.0f && RelayStrength( 1.0, Ends::Fade, 0.0 ) == 0.0f
+	           && RelayStrength( 0.5, Ends::Fade, 0.9 ) == RelayStrength( 0.5, Ends::Fade, 0.5 ),
+	       "End Length 0 is a cut at progress 1; End Length is clamped to 0.5" );
+	Check( std::isnan( EndProgress( std::nan( "" ), 0.5 ) ) == true && RelayStrength( std::nan( "" ), Ends::Fade, L ) == 1.0f,
+	       "an unread progress shows the relay" );
+
+	//One frame on: a 24-frame transition whose progress is k / 24 never
+	//reaches 1, so its last frame (23/24) must be judged at 24/24.
+	const double last = 23.0 / 24.0, before = 22.0 / 24.0;
+	Check( RelayStrength( EndProgress( last, before ), Ends::Fade, L ) == 0.0f,
+	       fmt( "the last frame of a k/24 transition (progress %.4f) is exactly SourceTo: the end is judged a frame on", last ) );
+	Negative( RelayStrength( last, Ends::Fade, L ) > 0.15f,
+	          fmt( "judged at its own progress the last frame would keep %.2f of the relay", RelayStrength( last, Ends::Fade, L ) ) );
+	Check( EndProgress( 0.4, 0.5 ) == 0.4 && EndProgress( 0.5, 0.5 ) == 0.5,
+	       "a falling or flat curve is judged where it is" );
+
+	//The crossfade itself, on two pictures.
+	std::vector< float > to( 4 * 6 ), out( 4 * 6 );
+	for( size_t i = 0; i < to.size(); ++i )
+	{
+		to[ i ]  = 0.1f * static_cast< float >( i % 7 );
+		out[ i ] = 0.9f - 0.05f * static_cast< float >( i % 5 );
+	}
+	std::vector< float > copy = out;
+	relay::transition::FadeToRows( to.data(), copy.data(), 3, 0, 2, 0.0f );
+	bool exact = copy == to;
+	copy       = out;
+	relay::transition::FadeToRows( to.data(), copy.data(), 3, 0, 2, 0.25f );
+	double worst = 0.0;
+	for( size_t i = 0; i < to.size(); ++i )
+		worst = std::max( worst, std::fabs( copy[ i ] - ( 0.75 * to[ i ] + 0.25 * out[ i ] ) ) );
+	Check( exact && worst < 1e-6, fmt( "the crossfade: strength 0 is SourceTo exactly, 0.25 is a quarter of the relay (worst %.1e)", worst ) );
+}
+
 int runTransition()
 {
 	std::printf( "the OpenFX build's curve reading, frame logic and C++ pass, against this build\n\n" );
 
 	std::printf( "  the coil over a Transition curve\n" );
 	curveChecks();
+
+	std::printf( "\n  the transition's end\n" );
+	endChecks();
 
 	//The scenarios. Every one renders every frame up to its last through the
 	//real plugin, so its state machine runs as it does in Resolume, and

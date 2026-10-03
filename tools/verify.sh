@@ -49,6 +49,11 @@
 #                 it: universal, OfxGetPlugin exported, the plist naming the
 #                 binary on disk, an ad-hoc sign, and ofxprobe loading it and
 #                 reading back its identifier, label, group and context
+#   openfx        with OFXHOST set to an ofxprobe that hosts transitions: the
+#   rendered      bundle rendered -- SourceFrom before the switch and SourceTo
+#                 on the last frame byte for byte (Ends Fade), not under Cut,
+#                 and --quirks fusion's no-frame-rate host giving the 24 fps
+#                 frame. Skipped without OFXHOST
 #   bench         the render cost, for the record. Not pass/fail -- there is
 #                 no threshold worth asserting on somebody else's GPU -- but
 #                 a verify run leaves a timing on the record, which is what
@@ -438,6 +443,81 @@ if [ "$(uname)" = "Darwin" ]; then
 			printf '   skipped: ofxprobe not built at %s\n' "$OFXPROBE"
 		fi
 	fi
+fi
+
+#---------------------------------------------------------------------------
+# The OpenFX transition RENDERED, when a host with the Transition context is
+# at hand: OFXHOST names it (the fleet's extended ofxprobe, with --context
+# transition, --transition-ramp and --quirks). Without it this step skips --
+# rltest --transition is the render check that always runs.
+#
+# A one-second transition at 24 fps, defaults: the frame before the switch is
+# SourceFrom byte for byte, the last frame is SourceTo byte for byte under
+# Ends Fade and is not under Cut, and under --quirks fusion (no frame rate
+# anywhere, as Resolve's Fusion page) the switching frames are the 24 fps
+# fallback's, byte for byte.
+#---------------------------------------------------------------------------
+if [ -n "${OFXHOST:-}" ] && [ -x "$OFXHOST" ] && [ -d "$OFX_BUNDLE" ]; then
+	step "openfx transition, rendered (OFXHOST)"
+	tmp=$(mktemp -d)
+	python3 - "$tmp" <<'CARDS_PY'
+import sys
+out = sys.argv[1]
+w, h = 160, 90
+def write(name, px):
+    with open(f"{out}/{name}.ppm", "wb") as f:
+        f.write(b"P6\n%d %d\n255\n" % (w, h))
+        f.write(bytes(px))
+a, b = [], []
+for y in range(h):
+    for x in range(w):
+        a += [(x * 7) % 256, 40 + (x // 20) * 25, 200 - (x // 20) * 20]
+        b += [240, 140, 40] if (y // 6) % 2 else [30, 60 + y, 200]
+write("from", a)
+write("to", b)
+CARDS_PY
+	render() {  # label, then flags
+		local label=$1; shift
+		"$OFXHOST" --no-system-dirs --dir "$BUILD" --render com.stoatworks.relay --context transition \
+			--from "$tmp/from.ppm" --to "$tmp/to.ppm" --transition-ramp 0:24 --range 0:24 "$@" \
+			--out-only "$tmp/$label.ppm" >"$tmp/$label.log" 2>&1
+	}
+	same() {  # two PPMs, pixels only
+		python3 - "$1" "$2" <<'SAME_PY'
+import sys
+def px(p):
+    raw = open(p, "rb").read(); i = f = 0
+    while f < 4:
+        while raw[i:i+1].isspace(): i += 1
+        while not raw[i:i+1].isspace(): i += 1
+        f += 1
+    return raw[i+1:]
+sys.exit(0 if px(sys.argv[1]) == px(sys.argv[2]) else 1)
+SAME_PY
+	}
+	if render before --frame-rate 24 --time 11 && render switch --frame-rate 24 --time 13 \
+	   && render lastfade --frame-rate 24 --time 23 && render lastcut --frame-rate 24 --time 23 --set ends=1; then
+		if same "$tmp/before.ppm" "$tmp/from.ppm"; then pass "frame 11, before the switch at Pull-in 0.5, is SourceFrom byte for byte"; else fail "frame 11 is not SourceFrom"; fi
+		if ! same "$tmp/switch.ppm" "$tmp/from.ppm" && ! same "$tmp/switch.ppm" "$tmp/to.ppm"; then pass "frame 13 is the relay at work, neither clip"; else fail "frame 13 is one of the clips"; fi
+		if same "$tmp/lastfade.ppm" "$tmp/to.ppm"; then pass "the last frame (23/24) is SourceTo byte for byte under Ends Fade"; else fail "the last frame is not SourceTo under Fade"; fi
+		if ! same "$tmp/lastcut.ppm" "$tmp/to.ppm"; then pass "and is not under Ends Cut, where the roll is still running"; else fail "Cut's last frame is SourceTo -- the Fade check above proves nothing"; fi
+		if render quirks --quirks fusion --time 13; then
+			if same "$tmp/quirks.ppm" "$tmp/switch.ppm"; then
+				pass "--quirks fusion (no frame rate anywhere) renders the 24 fps fallback's frame 13 byte for byte"
+			else
+				fail "--quirks fusion does not render the 24 fps frame"
+			fi
+		elif grep -q -- '--quirks' "$tmp/quirks.log"; then
+			printf '   skipped: this OFXHOST has no --quirks\n'
+		else
+			fail "the plugin fails under --quirks fusion -- see $tmp/quirks.log"
+		fi
+	else
+		fail "OFXHOST could not render the transition -- see $tmp/*.log"
+	fi
+else
+	step "openfx transition, rendered (OFXHOST)"
+	printf '   skipped: set OFXHOST to an ofxprobe with --context transition -- rltest --transition is the render check\n'
 fi
 
 step "bench"

@@ -46,6 +46,20 @@
 /// animate: they describe the installation, not the cut, and a frame's
 /// history is worked out with the settings at that frame.
 ///
+/// **Pull-in defaults to 0.5**, not the Resolume build's 0.7: on a timeline
+/// the default is where in the transition the cut lands, and 0.5 is the edit
+/// point of a centred transition, with half of it left for the re-lock. And
+/// the transition has an **End** the mixer does not: under Fade, the default,
+/// its last End Length crossfades to exactly SourceTo, because the re-lock
+/// outlasts half a one-second transition and the host shows SourceTo itself
+/// the frame after. Measured in DaVinci Resolve 21.1 before both: a 24-frame
+/// transition still rolling on its last frame, then a pop. See Transition.h.
+///
+/// **Frame rate.** OFX time is in frames and the relay works in seconds. The
+/// rate is read from the output clip, the inputs, then the effect, each in its
+/// own try; a host that reports none -- Resolve's Fusion page reports none at
+/// all -- is taken as 24 fps. No host property read here may escape render.
+///
 /// ------------------------------------------------------------- and tiles
 ///
 /// The roll fetches from anywhere in the picture and the crosstalk reaches
@@ -88,10 +102,15 @@ constexpr const char* kPluginDescription =
 	"Each frame is worked out from the transition's progress up to that frame, "
 	"so any frame renders on its own and the same frame always renders the "
 	"same.\n\n"
+	"With Ends on Fade, the default, the last part of the transition "
+	"crossfades to exactly SourceTo, so a re-lock still rolling when the "
+	"transition ends does not pop.\n\n"
 	"Differences from the Resolume build: the host's transition progress "
-	"replaces Opacity; Take (a momentary button) and Select are one fixed "
-	"choice of which clip the relay rests on; Standard, Switch Point, Select "
-	"and Genlocked do not animate.\n\n"
+	"replaces Opacity; Pull-in defaults to 0.5, the middle of the transition, "
+	"not 0.7; Take (a momentary button) and Select are one fixed choice of "
+	"which clip the relay rests on; Standard, Switch Point, Select and "
+	"Genlocked do not animate; Ends is the transition's own. A host that "
+	"reports no frame rate is taken as 24 fps.\n\n"
 	"https://stoatworks-labs.com";
 
 /// The longest stretch of the Transition curve a render reads back, in
@@ -114,6 +133,12 @@ constexpr const char* kParamLockTime    = "lockTime";
 constexpr const char* kParamDamping     = "damping";
 constexpr const char* kParamCrosstalk   = "crosstalk";
 constexpr const char* kParamCorner      = "corner";
+constexpr const char* kParamEnds        = "ends";     ///< lenticular's and pilot's name
+constexpr const char* kParamEndLength   = "endLength";///< lenticular's and pilot's name
+
+/// The frame rate assumed when the host reports none anywhere: Resolve's
+/// default timeline rate. Resolve's Fusion page reports none at all.
+constexpr double kFallbackFrameRate = 24.0;
 
 using namespace relay;
 
@@ -222,6 +247,25 @@ void scatterRows( const float* in, OFX::Image* dst, const OfxRectI& bounds, cons
 	}
 }
 
+/// Whether a clip's pixels are premultiplied. An RGB clip has no alpha to be
+/// premultiplied by, and treating it as premultiplied is what makes the round
+/// trip an identity there; a host that does not say is taken to be
+/// premultiplied, as Resolume and Resolve both are. Read inside its own try:
+/// a host property must not escape render.
+bool premultipliedOf( const OFX::Clip* clip, OFX::PixelComponentEnum comps )
+{
+	if( comps != OFX::ePixelComponentRGBA )
+		return true;
+	try
+	{
+		return clip->getPreMultiplication() != OFX::eImageUnPreMultiplied;
+	}
+	catch( ... )
+	{
+		return true;
+	}
+}
+
 /// One input into a float picture, whatever its depth and components.
 void gather( const OFX::Image* src, const OFX::Clip* clip, const OfxRectI& bounds, std::vector< float >& out )
 {
@@ -236,9 +280,7 @@ void gather( const OFX::Image* src, const OFX::Clip* clip, const OfxRectI& bound
 	if( comps != OFX::ePixelComponentRGBA && comps != OFX::ePixelComponentRGB )
 		OFX::throwSuiteStatusException( kOfxStatErrUnsupported );
 
-	//An RGB clip has no alpha to be premultiplied by; treating it as
-	//premultiplied is what makes the round trip an identity there.
-	const bool premultiplied = comps != OFX::ePixelComponentRGBA || clip->getPreMultiplication() != OFX::eImageUnPreMultiplied;
+	const bool premultiplied = premultipliedOf( clip, comps );
 	const bool rgba          = comps == OFX::ePixelComponentRGBA;
 	float* data              = out.data();
 
@@ -293,6 +335,8 @@ public:
 		damping     = fetchDoubleParam( kParamDamping );
 		crosstalk   = fetchDoubleParam( kParamCrosstalk );
 		corner      = fetchDoubleParam( kParamCorner );
+		ends        = fetchChoiceParam( kParamEnds );
+		endLength   = fetchDoubleParam( kParamEndLength );
 	}
 
 	void render( const OFX::RenderArguments& args ) override
@@ -323,6 +367,14 @@ public:
 			transition::PlanFromCurve( [ this ]( double t ) { return transitionAt( t ); }, historyBegin( args.time ),
 			                           args.time, frameRate(), host, width );
 
+		//The end: how much of the relay is left against clean SourceTo.
+		int endsChoice = 0;
+		ends->getValueAtTime( args.time, endsChoice );
+		const float strength = transition::RelayStrength(
+			transition::EndProgress( transitionAt( args.time ), transitionAt( args.time - 1.0 ) ),
+			endsChoice == static_cast< int >( transition::Ends::Cut ) ? transition::Ends::Cut : transition::Ends::Fade,
+			endLength->getValueAtTime( args.time ) );
+
 		std::vector< float > a, b;
 		gather( from.get(), fromClip, bounds, a );
 		gather( to.get(), toClip, bounds, b );
@@ -330,9 +382,14 @@ public:
 		std::vector< float > out( static_cast< size_t >( width ) * height * 4, 0.0f );
 		const pass::Picture pa{ a.data(), width, height };
 		const pass::Picture pb{ b.data(), width, height };
-		forEachRowBand( height, [ & ]( int y0, int y1 ) { pass::Render( plan, pa, pb, out.data(), width, height, y0, y1 ); } );
+		forEachRowBand( height, [ & ]( int y0, int y1 ) {
+			if( strength > 0.0f )
+				pass::Render( plan, pa, pb, out.data(), width, height, y0, y1 );
+			if( strength < 1.0f )
+				transition::FadeToRows( b.data(), out.data(), width, y0, y1, strength );
+		} );
 
-		const bool premultiplied = comps != OFX::ePixelComponentRGBA || dstClip->getPreMultiplication() != OFX::eImageUnPreMultiplied;
+		const bool premultiplied = premultipliedOf( dstClip, comps );
 		const bool rgba          = comps == OFX::ePixelComponentRGBA;
 		const OfxRectI window    = args.renderWindow;
 		OFX::Image* image        = dst.get();
@@ -385,20 +442,35 @@ private:
 	}
 
 	/// Frames per second of the timeline: OFX time is in frames, the relay
-	/// works in seconds.
+	/// works in seconds. The output clip, then each input, then the effect,
+	/// each read on its own: a host is entitled to report none of them --
+	/// Resolve's Fusion page does not -- and a missing property must not
+	/// escape render.
 	double frameRate() const
 	{
-		double fps = 0.0;
+		const auto usable = []( double fps ) { return std::isfinite( fps ) && fps > 0.0; };
+		for( const OFX::Clip* clip : { dstClip, fromClip, toClip } )
+		{
+			try
+			{
+				const double fps = clip->getFrameRate();
+				if( usable( fps ) )
+					return fps;
+			}
+			catch( ... )
+			{
+			}
+		}
 		try
 		{
-			fps = dstClip->getFrameRate();
-			if( !( fps > 0.0 ) )
-				fps = getFrameRate();
+			const double fps = getFrameRate();
+			if( usable( fps ) )
+				return fps;
 		}
 		catch( ... )
 		{
 		}
-		return fps > 0.0 && std::isfinite( fps ) ? fps : 25.0;
+		return kFallbackFrameRate;
 	}
 
 	/// Where reading the curve back starts. The effect's duration taken back
@@ -477,6 +549,8 @@ private:
 	OFX::DoubleParam* damping     = nullptr;
 	OFX::DoubleParam* crosstalk   = nullptr;
 	OFX::DoubleParam* corner      = nullptr;
+	OFX::ChoiceParam* ends        = nullptr;
+	OFX::DoubleParam* endLength   = nullptr;
 };
 
 //---------------------------------------------------------------------------
@@ -605,10 +679,12 @@ void RelayPluginFactory::describeInContext( OFX::ImageEffectDescriptor& desc, OF
 
 	//------------------------------------------------------------------- Coil
 	OFX::GroupParamDescriptor* coil = defineGroup( desc, page, "groupCoil", "Coil" );
+	// 0.5 and not the Resolume build's 0.7: the edit point of a centred
+	// transition, with half of it left for the re-lock. See Transition.h.
 	defineSlider( desc, page, coil, kParamPullIn, "Pull-in",
 	              "The transition progress at which the coil pulls in and the relay cuts to the "
-	              "energised contact.",
-	              defaults.pullIn );
+	              "energised contact. 0.5, the default, is the edit point of a centred transition.",
+	              transition::kPullInDefault );
 	defineSlider( desc, page, coil, kParamDropOut, "Drop-out",
 	              "The progress at which an energised coil lets go again. Only matters if the "
 	              "progress comes back down. Above Pull-in it is taken as Pull-in.",
@@ -665,6 +741,36 @@ void RelayPluginFactory::describeInContext( OFX::ImageEffectDescriptor& desc, OF
 	              "0.25 to 4 MHz: the stray capacitance's corner, in the video signal's own "
 	              "frequency. Below it the leak falls 6 dB an octave.",
 	              defaults.corner );
+
+	//------------------------------------------------------------------- Ends
+	// The transition's own: the FFGL mixer has no end. Names, options and
+	// defaults are lenticular's and pilot's; only the end is faded, because
+	// the start is the relay at rest on SourceFrom already.
+	OFX::GroupParamDescriptor* endsGroup = defineGroup( desc, page, "groupEnds", "Ends" );
+	OFX::ChoiceParamDescriptor* endsParam = desc.defineChoiceParam( kParamEnds );
+	endsParam->setLabels( "Ends", "Ends", "Ends" );
+	endsParam->setHint( "Fade: over the last End Length of the transition the relay crossfades to exactly "
+	                    "SourceTo, so a picture still rolling when the transition ends does not pop. Cut: the "
+	                    "relay to the last frame, and whatever it is doing then is cut off." );
+	endsParam->appendOption( "Fade" );//transition::Ends::Fade, 0
+	endsParam->appendOption( "Cut" ); //transition::Ends::Cut, 1
+	endsParam->setDefault( static_cast< int >( transition::Ends::Fade ) );
+	endsParam->setAnimates( false );
+	endsParam->setParent( *endsGroup );
+	page->addChild( *endsParam );
+
+	OFX::DoubleParamDescriptor* lengthParam = desc.defineDoubleParam( kParamEndLength );
+	lengthParam->setLabels( "End Length", "End Length", "End Length" );
+	lengthParam->setHint( "How long the fade to SourceTo lasts, as a fraction of the transition: 0.15 is the "
+	                      "last 15%, finishing on the transition's last frame. Up to 0.5. Ignored under Cut." );
+	lengthParam->setRange( 0.0, static_cast< double >( transition::kEndLengthMax ) );
+	lengthParam->setDisplayRange( 0.0, static_cast< double >( transition::kEndLengthMax ) );
+	lengthParam->setDefault( static_cast< double >( transition::kEndLengthDefault ) );
+	lengthParam->setIncrement( 0.01 );
+	lengthParam->setDoubleType( OFX::eDoubleTypePlain );
+	lengthParam->setAnimates( false );
+	lengthParam->setParent( *endsGroup );
+	page->addChild( *lengthParam );
 
 	// The Stoatworks About block: a read-only credit line and one push button per
 	// link, in a group that starts folded. Last, so it sits under the effect's
