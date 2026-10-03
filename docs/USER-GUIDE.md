@@ -8,6 +8,9 @@ cut into bands of the old picture, black and the new one; the monitor has to
 re-lock to the new source, so the picture rolls and settles; and the open contact
 is a capacitor, so the other picture's edges leak through. Nothing dissolves.
 
+There is also an **OpenFX transition** build of the same relay, for DaVinci
+Resolve and Vegas: see [In Resolve and other OpenFX hosts](#in-resolve-and-other-openfx-hosts).
+
 ![The switching frame: bands of A, black and B where each contact bounce landed](hero.png)
 
 *The repo's two test cards through the plugin on the frame the switch lands on:
@@ -28,6 +31,8 @@ and rolled, because the monitor has not pulled B's field phase in yet.*
 > All 17 controls the harness can sweep change the picture.
 > It has **never been loaded into Resolume on macOS**.
 > On Windows, a build of v0.1.0 loads in Resolume Arena 7.27.1, is offered as a layer's Blend Mode and as a transition, is driven by the layer's opacity fader and by a layer transition, and hides only Standard, as designed — on software rendering, and no picture of it inside Resolume has been captured, so a correct render there is not yet shown.
+> The OpenFX transition agrees with the Resolume build to one 8-bit code in a test
+> host, but has **never been loaded into DaVinci Resolve** or any other real host.
 > **Try it on a spare layer first**, and please report anything that misbehaves.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human
@@ -62,6 +67,9 @@ layer.
 The Windows builds are not code-signed. Plugin files are not gated the way `.exe`
 files are, so Resolume loads them as normal; only the installer trips SmartScreen,
 once: **More info** → **Run anyway**.
+
+For DaVinci Resolve or Vegas, download the `relay-ofx-` zip for your platform
+instead and see [In Resolve and other OpenFX hosts](#in-resolve-and-other-openfx-hosts).
 
 ---
 
@@ -301,6 +309,53 @@ failed to compile.
 
 ---
 
+## In Resolve and other OpenFX hosts
+
+The OpenFX build is a **transition**. Put `Relay.ofx.bundle` from the
+`relay-ofx-` zip in the OpenFX plugin folder and restart the host:
+
+```
+macOS    /Library/OFX/Plugins/
+Windows  C:\Program Files\Common Files\OFX\Plugins\
+Linux    /usr/OFX/Plugins/
+```
+
+In DaVinci Resolve it should appear with the OpenFX video transitions, as
+**Relay** in the **Stoatworks** group (not yet seen there). Drop it on the cut
+between two clips. The outgoing clip
+is A, the incoming clip is B, and the transition's own progress (0 at its start,
+1 at its end) does what the layer's opacity fader does in Resolume: it is the
+coil voltage. With the defaults the relay pulls in when the transition is 70%
+of the way through, so the cut, the bounce and the start of the roll land there.
+
+The controls are Resolume's, with these differences:
+
+- **No Opacity.** The transition's progress is the coil.
+- **Pull-in** is how far through the transition the cut happens. **Drop-out**
+  matters only if the progress comes back down (a reversed or keyframed
+  transition); then the relay cuts back to the outgoing clip where the progress
+  falls to Drop-out. A reversed transition starts on the incoming clip.
+- **Select** is a choice, not a switch and a button: **From, then To** (the
+  relay rests on the outgoing clip) or **To, then From**.
+- **Standard, Switch Point, Select and Genlocked** cannot be keyframed. Everything
+  else can.
+- **The end of the transition ends the effect.** The picture rolls for about
+  two thirds of a second after the cut at the defaults; once the transition is
+  over the host shows the incoming clip itself. For the whole re-lock, make the
+  transition longer or Pull-in lower.
+
+Every frame is worked out from the transition's progress up to that frame, so
+scrubbing, rendering out of order and re-rendering all give the same picture.
+A crossing while a frame is being scanned cuts that frame, at the line the scan
+had reached — one frame sooner than Resolume, which reads its fader at the
+start of each frame, can show it.
+
+It runs on the CPU: about 3 ms a frame at 1920×1080 (10 ms with Crosstalk at 1)
+on an Apple M4 Max in a test host. It has **not yet been loaded into Resolve or
+Vegas**; please report what you see.
+
+---
+
 ## Known limits
 
 - **Standard is hidden in Resolume.** Arena does not show a mixer's first
@@ -322,7 +377,12 @@ failed to compile.
 - **Output alpha is the selected picture's**, so cutting between an opaque clip and
   a transparent one cuts the transparency too, as a router would. The open contact
   is opaque.
-- **No presets** and no OpenFX version.
+- **No presets.**
+- **The OpenFX transition has never been in a real host.** It was checked
+  against the Resolume build frame by frame offline and in a test host, not in
+  Resolve or Vegas. It relies on the host reporting the transition's progress
+  at times other than the frame being drawn; a host that did not would give a
+  plain cut at Pull-in.
 - **There is a browser demo** at [relay-demo.stoatworks-labs.com](https://relay-demo.stoatworks-labs.com).
   It is a port to a web page, not the plugin: the shaders run in WebGL2 and the
   relay's CPU half is rewritten in JavaScript. The page lists what it does not

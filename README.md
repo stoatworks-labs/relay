@@ -14,10 +14,14 @@
 > **0.013** (see [Status](#status)). It has **never been loaded into Resolume on
 > macOS**; on Windows it has run in Resolume Arena 7.27.1, on software rendering,
 > as a layer's Blend Mode. It is the fleet's third FFGL *mixer*, after genlock and
-> wipe. Check it in your own rig before trusting it in a show.
+> wipe. The [OpenFX build](#openfx--resolve-vegas-nuke-natron) is a transition, and
+> agrees with the FFGL build to **one 8-bit code** in a test host, but has **never
+> been loaded into DaVinci Resolve** or any other real host. Check it in your own
+> rig before trusting it in a show.
 
 An A/B cut made by a relay — bounce and all — as an FFGL **mixer** for
-[Resolume](https://resolume.com) Arena and Avenue.
+[Resolume](https://resolume.com) Arena and Avenue, and as an OpenFX
+**transition** for DaVinci Resolve and Vegas.
 
 ![The switching frame: bands of A, black and B where each contact bounce landed](docs/hero.png)
 
@@ -140,6 +144,69 @@ natural period, 0.05–2 s) and Damping (0.1–2: below 1 it rings).
 **Crosstalk** — Crosstalk (the leak at the corner) and Corner (0.25–4 MHz in
 the signal's own frequency; below it the leak falls 6 dB an octave).
 
+## OpenFX — Resolve, Vegas, Nuke, Natron
+
+The same relay also builds as an OpenFX plugin — as a **transition**, because
+that is what a cut between two clips is on a timeline. Put **Relay** (under
+*Stoatworks*) between two clips in DaVinci Resolve or Vegas Pro: the outgoing
+clip (`SourceFrom`) is A, the incoming one (`SourceTo`) is B, and the
+transition's own progress — 0 at its start, 1 at its end — is the coil voltage.
+So the relay cuts where the progress passes Pull-in, 70% of the way through by
+default, with the bounce, the roll and the crosstalk of the Resolume build. It
+declares the Transition context only, so it appears wherever a host offers
+OpenFX transitions and nowhere else; whether Nuke or Natron list it has not
+been checked.
+
+Grab the `relay-ofx-*` zip for your platform from the release and copy
+`Relay.ofx.bundle` into the standard OpenFX folder, then restart the host:
+
+```
+macOS    /Library/OFX/Plugins/
+Windows  C:\Program Files\Common Files\OFX\Plugins\
+Linux    /usr/OFX/Plugins/
+```
+
+It is the same relay, not a lookalike: the coil, the bounce schedule, the
+raster mapping, the re-lock and the crosstalk filter are the same C++ the
+Resolume build runs, and the per-pixel pass is the shader transcribed line for
+line. Hosted in a test host, the plugin's frames agree with the Resolume
+build's GPU render of the same cards to **one 8-bit code** (see
+[Status](#status)).
+
+**What is different from the Resolume build, and why:**
+
+- **No Opacity.** The host's transition progress is the coil voltage. Resolume
+  binds the mixer's Opacity to the layer's fader; a timeline has the
+  transition's progress instead.
+- **No memory, and none needed.** In Resolume the plugin remembers when the
+  coil last moved and carries the bounce and the roll from frame to frame. An
+  OpenFX host renders frames in any order, alone and on several threads, so
+  each frame reads the transition's progress back from the start of the
+  transition, finds where it crossed Pull-in — to a fraction of a frame, where
+  Resolume, which reads its fader once a frame, can only know which frame —
+  and works the bounce and the roll out from there in closed form. Any frame
+  renders on its own, and the same frame always renders the same.
+- **Hysteresis on a timeline.** Pull-in is where the rising progress cuts to
+  SourceTo. Drop-out matters only if the progress comes back down — a reversed
+  or a keyframed transition — and then the relay cuts back to SourceFrom where
+  the progress reaches Drop-out, not where it re-crosses Pull-in. A transition
+  that starts above Pull-in (a reversed one) starts on SourceTo with no switch,
+  as the Resolume build does on its first frame.
+- **Select and Take are one fixed choice.** Take is a momentary button in
+  Resolume and has no meaning on a timeline; here `Select` picks which clip
+  the relay rests on — *From, then To* (the default) or *To, then From*.
+- **Standard, Switch Point, Select and Genlocked do not animate.** They describe
+  the installation, not the cut. Every other control can be keyframed, and a
+  frame is worked out as if the relay had always had that frame's settings.
+- **A crossing during a frame's own scan cuts that frame.** The progress is
+  read to the end of the frame being scanned, so a cut lands on the line the
+  scan had reached when the contact moved. Resolume reads its fader at each
+  frame's start, so the FFGL build shows the same cut a frame later.
+- **The end of the transition cuts the roll short.** At the defaults the
+  picture rolls visibly for about two thirds of a second after the cut; when
+  the transition ends, the host shows SourceTo itself. Make the transition
+  longer, or Pull-in lower, to see the whole re-lock.
+
 ## Build
 
 Needs CMake and the Resolume FFGL SDK, which is a submodule.
@@ -154,6 +221,11 @@ cmake --install build    # → ~/Documents/Resolume Arena/Extra Effects
 
 macOS builds universal (arm64 + x86_64) by default. Add
 `-DCMAKE_OSX_ARCHITECTURES=arm64` for a faster development build.
+
+The same build makes the OpenFX bundle, `build/Relay.ofx.bundle`; copy it to
+the OpenFX folder above. `-DBUILD_OFX=OFF` leaves it out, and
+`-DRELAY_BUILD_FFGL=OFF` builds it alone with nothing but a compiler — no FFGL
+SDK and no GL loader, which is how the Linux build is made.
 
 The install path is **Extra Effects**, although this is a mixer. Resolume has
 one FFGL folder, and sources, effects and mixers all load from it: genlock and
@@ -176,7 +248,9 @@ different sizes, with different hardware padding, rendered to a third size.
     ./build/rltest --relock                 the roll is the second-order step response
     ./build/rltest --crosstalk              the leak doubles per octave below the corner
     ./build/rltest --mutation               one character of the shipped GLSL fails --bounce
-    ./build/rltest --bench                  720p through 4K, at rest and with Crosstalk on
+    ./build/rltest --transition             the OpenFX build against this one, frame by frame
+    ./build/rltest --bench                  720p through 4K, at rest and with Crosstalk on;
+                                            the GPU, then the OpenFX build's C++ pass
     ./build/rltest --pipe --pipe-src F      two raw RGBA streams in, frames out (filming, not a check)
     python3 tools/sweep.py                  no control is silently dead
     tools/verify.sh                         all of it, on a fresh universal build
@@ -214,6 +288,12 @@ and on Apple's software renderer:
 | macOS binary | universal (`x86_64 arm64`), exports `plugMain`, ad-hoc signs |
 | Host metadata | `oxbow probe` reads **SW Relay / RL01 / mixer / inputs 2..2**, parameter 0 **Standard** |
 | Render cost | **0.03 ms/frame at 720p, 0.04 at 1080p, 0.11 at 4K** at rest (0.7% of a 60 fps frame); with Crosstalk on **0.05 at 1080p, 0.13 at 4K**, worst of several runs |
+| OpenFX: the curve | `rltest --transition`: a 0→1 ramp over 50 frames pulls in at frame **36.25** (Pull-in 0.725 × 50) to 1e-9 of a frame; up and back down, in at 21.75 and out at Drop-out's **51.75**, not at Pull-in's 38.25 (a coil with no hysteresis drops there: the negative control); a reversed transition starts energised and drops once; a flat curve never switches; a step lands exactly on its frame; a host that refuses times outside the transition changes nothing; a crossing 5 ms into a frame's scan cuts that frame on line 78 |
+| OpenFX: the frame | the plan worked out from the curve is the FFGL plugin's own plan **exactly** — starting contact, every cut's line, fraction and state, the roll, the tear and the crosstalk filter — on **100 frames** of five scenarios at both rasters: the defaults through the roll's settling, a drop-out on NTSC with a long bounce and crosstalk, Vertical Interval with Select inverted, a switch during a switch, two padded inputs of two sizes. Negative control: the curve a frame late is not the plan |
+| OpenFX: the pixels | the C++ pass against the GPU on those 100 frames: worst **1/255**, 75,891 of 14.4 M pixels differ at all, **none by more than one code**, none at a cut; on Apple's software renderer 8,848, also never more than one. Negative control: twice the bounce puts 7,765 pixels further off |
+| OpenFX in a host | the bundle in a CPU OpenFX test host (resolume-ofx-bridge's `ofxprobe`, extended with a Transition context and keyed parameters), Transition keyed to step at a frame, against `rltest --pipe` on the GPU with the same cards and cue sheet: **30 frames of four scenarios, worst 1/255, 0 pixels off by more than one code** (76,332 of 6.9 M by one); the control, twice the bounce, is 32,491 pixels further off. On the host's own curves: a 0→1 ramp over 24 frames at 60 fps leaves frames 15 and 16 SourceFrom bitwise and cuts frame 17 from row 90 (the break 8 ms after the 16.8-frame crossing is line 72 of that frame's scan); up-and-down cuts at frames 17 and 41 (Drop-out) and not at 31 (Pull-in, where Drop-out 0.7 does cut); a reversed one starts on SourceTo bitwise. A frame rendered alone, after its predecessors, or out of order is **the same picture** (hashes). 8-bit and float agree bitwise |
+| OpenFX binary | universal, exports `OfxGetPlugin`, the plist names the binary, ad-hoc signs; `ofxprobe` reads `com.stoatworks.relay` / Relay / Stoatworks, Transition context only |
+| OpenFX render cost | 1920×1080 in the test host (its thread suite gives 8 threads; marshalling and the curve reading included): **3.3 ms/frame** at rest, switching or rolling, **9.8 ms** with Crosstalk 1. The C++ pass alone (`rltest --bench`, 16 threads): 1.0 ms at rest, 7.5 ms with Crosstalk 1; on one thread 7.4 and 58.6 ms |
 
 Run `tools/verify.sh` before believing any of it.
 
@@ -235,9 +315,20 @@ llvmpipe. The line PLL's tear is a look, not a
 model, and nothing measures it. The dwell fraction of a bounce (half of each
 interval closed) and the approach flight (as long as the first bounce) are
 model constants, not measurements of any relay. There is a
-[user guide](https://stoatworks-labs.com/software/relay/guide/); no presets and
-no OpenFX port. The [browser demo](https://relay-demo.stoatworks-labs.com)
+[user guide](https://stoatworks-labs.com/software/relay/guide/), and no
+presets. The [browser demo](https://relay-demo.stoatworks-labs.com)
 is a port of the plugin, not the plugin.
+
+The **OpenFX transition has never been loaded into DaVinci Resolve, Vegas or
+any other real host** — only into a test host on this Mac, and its Windows and
+Linux builds only into a compiler and, on Linux, a Rocky 8 `dlopen`. The whole
+reformulation rests on the host answering the Transition parameter at times
+other than the frame being rendered, which the OpenFX API provides and the test
+host does; that Resolve does is not yet seen. A host that answered with the
+current value at every time would get a plain cut at Pull-in, with no bounce or
+roll. Where the transition starts is taken as the effect's duration back from
+the frame being rendered (the output's frame range if a host reports no
+duration) — an assumption about the host, not a measurement.
 
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, and the traps.

@@ -8,7 +8,9 @@ universal macOS `.bundle` and a Windows `.dll`. MIT. Intended home
 `github.com/stoatworks-labs/relay`, released v0.1.0 2026-09-24. Never loaded
 into Resolume on macOS; probed by hand in Arena 7.27.1 on Windows the same day
 (see "What Relay showed in Arena"). The fleet's third mixer, after genlock
-and wipe.
+and wipe. It also builds as an **OpenFX transition** for Resolve and Vegas
+(`source/ofx/RelayOFX.cpp`, CPU render): see "The OpenFX build" below. Never
+loaded into a real OpenFX host.
 
 `CLAUDE.md` is the command reference. This file is the *why*: the idea, every
 number in the harness and where it comes from, the traps this build actually
@@ -75,7 +77,11 @@ framebuffer**.
 | `--crosstalk` octave | **2 within 0.05** | The physics, out of the picture: 2→4→8 cycles per width, well under the 52-cycle corner, doubles per octave. The stated filter's own departure from 2 there is printed beside it (0.0119, 0.0112); measured 0.0106 and 0.0127. Negative controls: 32 cycles leaks more than 4× 2 cycles; `kFaultFlatCrosstalk` (the other input itself, not its high-pass) fails 3 assertions. |
 | `--crosstalk` corner | **1e-12** | `gain × |H( corner )| = Crosstalk` on the CPU: at the corner the leak equals the setting, by construction. |
 | `--mutation` | **fails** | One character of the shipped GLSL — `/ OutSize.y` → `/ OutSize.x` in the line mapping — fails 3 `--bounce` assertions; the shipped text through the same hook passes and renders the default path's bytes. |
-| `--bench` | not asserted | No threshold is worth asserting on somebody else's GPU. |
+| `--transition` curve | **1e-9 of a frame** | `transition::CoilHistory` against closed forms: a 0→1 ramp over 50 frames pulls in at 36.25 (Pull-in 0.725 × 50); up to 1 at 30 and back to 0 at 60 pulls in at 21.75 and drops at Drop-out's 51.75; reversed 1→0 starts energised and drops at 36.25; flat 0.5 never switches; a step at frame 7 switches at 7 **exactly**; NaN outside the transition (a refusing host) with the read-back starting a duration early changes nothing. The bound is the bisection's: 32 halvings of a one-frame bracket, 2.3e-10. Negative control: Drop-out at Pull-in drops at 38.25. |
+| `--transition` in-scan | **the line** | A ramp crossing Pull-in 0.3 frames (5 ms at 60 fps) after frame 10 starts, Operate 0: frame 10's first cut is on PAL line floor( 5 ms / 64 µs ) = 78, and frame 9 has none. The FFGL plugin cannot show this (it reads its fader at frame starts); see "The OpenFX build". |
+| `--transition` plan | **exact**, every field | `transition::PlanFromCurve` on the cue sheet as a step curve against the plan the FFGL plugin handed its shader (`StateForTest().plan`), compared with `!=` on doubles: starting contact, every cut's line, xfrac and state, open level, rolled source, roll, tear, crosstalk gain / decay / taps / norm. 50 frames × 2 rasters over five scenarios (below). Both sides are the same double arithmetic on the same floats, so there is no tolerance to derive. The first run differed by 3e-7 in one xfrac -- the harness's step curve had a 1e-9 epsilon in its floor, which moved the step 1e-9 frames early; a step must be AT its frame. Negative control: the curve a frame late is not the plan (10 cuts vs 0). |
+| `--transition` pixels | **one 8-bit code** away from a cut; within one pixel of a cut on its line, counted | `pass::Render` on the plan against the GPU's RGBA8 frame. Away from a cut both passes fetch the same texels with the same weights in float; the GPU's bilinear weights are fixed-point and its float sums may fuse, which moves a channel by under one code before rounding. Measured: worst 1/255, 75,891 of 14.4 M pixels differ (8,848 on the software renderer), none by more than one code, none at a cut. Negative control: twice the bounce, 7,765 pixels off by more than one code away from any cut. |
+| `--bench` | not asserted | No threshold is worth asserting on somebody else's GPU. The C++ pass is timed beside it, on every core and on one. |
 
 **Negative controls live in the shipping class.** `Relay::SetFaultForTest`
 takes a bitmask of `relay::Fault`; the shipped plugin carries 0 and nothing
@@ -166,6 +172,15 @@ defaults; the synthetic clock; the same-second make.
     source/Shaders.cpp      the pass. One vertex, one fragment: which contact
                             was the relay on when this pixel was scanned;
                             the roll; the crosstalk taps.
+    source/Pass.*           the same pass in C++, for the OpenFX build: every
+                            function marked `//= mirrored`. Change both.
+    source/Frame.*          frame::Plan -- one frame as the pass is handed it
+                            (the uniforms) -- and the settle and tear constants.
+    source/Transition.*     the OpenFX build's relay: the coil over a
+                            Transition curve, and the frame planned from it as
+                            a pure function of time.
+    source/ofx/RelayOFX.cpp the OpenFX plugin: the Transition context, the
+                            parameters, marshalling. No relay logic of its own.
     source/Relay.*          the plugin: type, parameters, the two inputs, and
                             the state machine that turns the coil into a
                             schedule and the schedule into this frame's cuts.
@@ -177,7 +192,8 @@ defaults; the synthetic clock; the same-second make.
     source/Controls.*       0..1 host parameters to ms, e, seconds, MHz.
     source/Timing.*         the host clock, the epoch, real elapsed time.
     source/Diag.*           a log file, for the shader that will not compile.
-    tools/rltest/           the offline harness. Two inputs. Eight checks.
+    tools/rltest/           the offline harness. Two inputs. Eight checks, and
+                            --transition for the OpenFX build.
     tools/sweep.py          no control is silently dead.
     tools/verify.sh         all of it.
 
@@ -315,8 +331,10 @@ at 4K. As genlock found, a tenth of a millisecond is close to what a
   it.
 - **The hero image** is the harness's render, not Resolume's.
 - The About block is generated now (`sync-about.py`), with the User guide
-  button: 22 parameters, 17 swept. No presets, no OpenFX port. The browser demo
-  exists and is a port, not the plugin; see *The browser demo* below.
+  button: 22 parameters, 17 swept. No presets. The OpenFX build is a
+  transition that has never been in a real host; see *The OpenFX build*. The
+  browser demo exists and is a port, not the plugin; see *The browser demo*
+  below.
 
 ---
 
@@ -387,6 +405,122 @@ the plugin's own diag log, which since bba55b5 logs one line per switch.
    button (`ParamEvent`), and a REST press reaches the plugin as a press**
    (above). Still open: whether a click in the panel sends the release, since
    over REST a second press 1.5 s later was not counted.
+
+---
+
+## The OpenFX build
+
+**What it is.** The FFGL mixer's OpenFX equivalent is the **Transition
+context**: `SourceFrom` is A (what the relay rests on), `SourceTo` is B, and the
+mandated `Transition` parameter -- 0 at the start of the transition, 1 at its
+end, driven by the host -- is the coil voltage, the FFGL build's Opacity. CPU
+render over the host's buffer, rows sliced across the host's thread suite.
+Identity `com.stoatworks.relay`, label Relay, group Stoatworks, bundle
+`com.stoatworks.relay.ofx`.
+
+**What is shared, and how much.** Everything but the marshalling. `relay_dsp`
+(an OBJECT library with no GL in it) holds Controls, Raster, Model, Frame, Pass
+and Transition; the FFGL plugin and rltest link it beside `relay_core`, and the
+OpenFX plugin links it alone. `Relay::ProcessOpenGL` now fills a `frame::Plan`
+and sets every uniform from it, and the OpenFX build hands `pass::Render` the
+same struct, so the two passes are handed the same thing by construction.
+`HostValues` (Controls.h) is the one table of defaults both builds declare
+from.
+
+**The reformulation.** The FFGL plugin integrates: a coil primed by its first
+frame, a pending switch, a schedule carried forward and merged, a roll that
+switches itself off. None of that survives a host that renders frames out of
+order, alone, on several threads. What survives is the curve: OpenFX lets a
+plugin read a parameter at any time. So every render reads `Transition` from
+the start of the transition to **the end of this frame's scan**, runs
+model::Coil over the readings, bisects each change of state to the instant the
+threshold was met, and replays the FFGL plugin's armature logic over those
+events in closed form (`transition::PlanAt`): break at operate time (or the
+blanking before the first frame starting after it), BounceSchedule, merge into
+the previous schedule at the break, roll from the last make. `--transition`
+shows that on frame-step curves the result is the FFGL plugin's plan exactly.
+
+**Decisions taken without asking:**
+
+- **Transition context only.** General would cost a user-animated Transition of
+  the plugin's own, over a span as long as the clip, read back on every render,
+  and in General there is no host-driven ramp to say where a transition starts.
+  Resolve's own sample declares both; this declares one, and describeInContext
+  refuses any other.
+- **The relay starts where the coil says at the first reading**, as the FFGL
+  plugin's first frame does: no switch at the start. A reversed transition
+  (1 → 0) therefore starts on SourceTo and drops at Drop-out. Pull-in 0 is a
+  transition that is SourceTo throughout.
+- **The read-back starts the effect's duration before this frame**
+  (`getEffectDuration`), which reaches the transition's start wherever the host
+  puts time zero; the output clip's frame range if no duration; no history if
+  neither. Capped at 3600 frames. A host that refuses a time (the parameter
+  call throws) gives no reading there, and the coil skips it. Readings are
+  every whole frame plus the span's ends, so an excursion narrower than a frame
+  is not seen.
+- **The curve is read to the end of the frame's scan, not its start.** A
+  crossing while the frame is scanned therefore cuts that frame at the line
+  the scan had reached. The FFGL plugin reads its fader at frame starts and
+  shows the same cut a frame later. It also means a frame can see a coil change
+  that the FFGL plugin would only learn of at the next frame -- at 60 fps PAL
+  (an 18.4 ms scan every 16.7 ms) a break in the last 1.8 ms of the scan. The
+  `--transition` scenarios keep their breaks out of that overlap (Operate 2 ms,
+  not 0, in "switch during a switch"); the in-scan check exercises it on
+  purpose.
+- **A coil change before the armature moves replaces the pending switch**,
+  judged by the BREAK time. The FFGL plugin judges by the frame the switch
+  fires on, and the two differ only when the coil flips again within a frame
+  of a break that fell between two scans. **A switch to where the armature
+  already is does nothing**; the FFGL plugin would bounce A → A (break and
+  remake) when the coil flips twice inside one operate time. Neither case is
+  in the harness.
+- **Every setting is read at the frame being rendered** and stands for the
+  whole history: keyframing Operate Time moves the cut as if the relay had
+  always been that slow. **Standard, Switch Point, Select and Genlocked do not
+  animate** (`setAnimates( false )`): with them static, the roll's "genlocked
+  kills it for good" and the schedule's line period are the FFGL plugin's.
+- **Select and Take are one fixed choice**, `Select`: *From, then To* (rest on
+  SourceFrom, the FFGL default) or *To, then From* (Select on). Take is a
+  momentary latch, which has no timeline meaning.
+- **Inputs are read at the output's pixel positions**, premultiplied float, a
+  clip smaller than the frame transparent where it has no pixels; the pass then
+  sees two pictures the output's size. The shader stretches each texture over
+  the output instead; with equal sizes -- what Resolve hands a transition -- the
+  two are the same. The pass itself supports two sizes, and `--transition`'s
+  padded scenario checks that against the GPU.
+- **Option labels are spelt out** (`Vertical Interval`, not `Vert Interval`):
+  FFGL's 16-character limit does not apply. The parameter names and 0..1 ranges
+  are the FFGL build's.
+- **No Fault uniform.** The negative controls are GPU-side, to show the GPU
+  checks can fail; the C++ pass does not mirror them.
+
+**Verified (2026-10-03, M4 Max):** `rltest --transition` as tabled above, on
+the GPU and on Apple's software renderer. The bundle itself in a CPU OpenFX
+test host -- resolume-ofx-bridge's `ofxprobe` at 0208a04, extended in scratch
+with a Transition context, keyed parameters, `--time` and `--batch` --
+against `rltest --pipe` on the GPU, opaque cards, Transition keyed to step
+1e-9 frames before each cue: 30 frames of four scenarios (defaults; drop-out
+NTSC with a 4 ms bounce, Open Level and crosstalk; Vertical Interval, Select
+inverted, genlocked, up and down; Crosstalk 1 with a ringing re-lock), worst
+1/255, none off by more than one code; twice the bounce is 32,491 pixels off.
+On the host's own curves at 60 fps: a 0 → 1 ramp over 24 frames leaves frames 15
+and 16 SourceFrom bitwise and cuts frame 17 from row 90 of 360 (the break, 8 ms
+after the crossing at 16.8, is line 72 of frame 17's scan); 0 → 1 → 0 over 48
+frames opens the contact at frames 17 and 41 and not 31, and with Drop-out 0.7 at
+31 and not 41; 1 → 0 is SourceTo bitwise until the drop. Frames rendered alone,
+after their predecessors in one instance, and out of order hash the same.
+8-bit and float renders agree bitwise. 1920×1080 in that host, 8 threads,
+marshalling included: 3.3 ms at rest, switching or rolling; 9.8 ms with
+Crosstalk 1.
+
+**Not verified:** any real host. Never loaded into Resolve, Vegas, Nuke or
+Natron; whether Resolve answers `Transition` at times other than the frame
+being rendered -- the reformulation depends on it -- is the API's promise, not
+an observation (a host that answered with the current value everywhere would
+give a plain cut at Pull-in). What Resolve reports as the effect's duration
+and time origin for a transition is assumed, as above. The Windows and Linux
+builds have only compiled (and, on Linux, `dlopen`ed on Rocky 8 in CI); 16-bit
+and RGB-only clips have not been rendered by any host.
 
 ---
 
