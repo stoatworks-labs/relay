@@ -41,6 +41,45 @@ endif()
 
 option(RELAY_BUILD_TOOLS "Build the offline render and measurement harness" ON)
 
+# The FFGL plugin, the FFGL SDK submodule and GLEW are one dependency group, and
+# the OpenFX plugin belongs to none of it. Turning this OFF builds the OFX plugin
+# alone, with no GL loader anywhere in the configure -- which is what the Linux
+# job does, because the FFGL SDK has no Linux path and GLEW would otherwise have
+# to be installed to build something that never calls it.
+option(RELAY_BUILD_FFGL "Build the FFGL plugin (needs the FFGL SDK and, off macOS, GLEW)" ON)
+
+# ---------------------------------------------------------------------------
+# The relay with no GL in it at all: the parameter conversions, the raster,
+# the coil, the bounce schedule, the re-lock and the crosstalk filter (the
+# arithmetic both builds share); the frame plan the pass is handed; the
+# OpenFX build's reading of a Transition curve; and the pass transcribed to
+# C++.
+#
+# A separate library from the FFGL core because the OpenFX plugin renders on
+# the CPU and the Linux job has no GL loader configured. Splitting it is what
+# lets the OFX build link the SAME arithmetic rather than a second
+# transcription of it -- and lets the harness put the C++ pass beside the GLSL
+# one.
+# ---------------------------------------------------------------------------
+add_library(relay_dsp OBJECT
+    source/Controls.h
+    source/Controls.cpp
+    source/Raster.h
+    source/Raster.cpp
+    source/Model.h
+    source/Model.cpp
+    source/Frame.h
+    source/Frame.cpp
+    source/Pass.h
+    source/Pass.cpp
+    source/Transition.h
+    source/Transition.cpp
+)
+target_include_directories(relay_dsp PUBLIC source)
+set_target_properties(relay_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(RELAY_BUILD_FFGL)
+
 # ---------------------------------------------------------------------------
 # The Resolume FFGL SDK, as a git submodule pinned to b1afaf9 -- the rev the
 # rest of the fleet pins.
@@ -69,14 +108,8 @@ add_library(relay_core OBJECT
     source/StoatworksAboutParams.h
     source/Diag.h
     source/Diag.cpp
-    source/Controls.h
-    source/Controls.cpp
     source/Timing.h
     source/Timing.cpp
-    source/Raster.h
-    source/Raster.cpp
-    source/Model.h
-    source/Model.cpp
     source/Shaders.h
     source/Shaders.cpp
     source/Relay.h
@@ -84,7 +117,7 @@ add_library(relay_core OBJECT
 )
 
 target_include_directories(relay_core PUBLIC source)
-target_link_libraries(relay_core PUBLIC ffgl::sdk)
+target_link_libraries(relay_core PUBLIC ffgl::sdk relay_dsp)
 target_compile_definitions(relay_core PUBLIC RELAY_VERSION="${PROJECT_VERSION}")
 set_target_properties(relay_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -102,7 +135,11 @@ endif()
 # ---------------------------------------------------------------------------
 function(relay_add_plugin target entry bundle_name identifier)
     add_library(${target} MODULE ${entry})
-    target_link_libraries(${target} PRIVATE relay_core)
+    # relay_dsp is named again here, and on every other final target, because
+    # an OBJECT library's objects do NOT travel transitively through a second
+    # OBJECT library: relay_core linking it gives this target the include
+    # paths and nothing to link.
+    target_link_libraries(${target} PRIVATE relay_core relay_dsp)
 
     if(APPLE)
         set_target_properties(${target} PROPERTIES
@@ -159,7 +196,7 @@ if(RELAY_BUILD_TOOLS AND APPLE)
     add_executable(rltest tools/rltest/main.cpp)
     # zlib ships with the OS, which is why the PNG writer is fifty lines
     # rather than a vendored dependency.
-    target_link_libraries(rltest PRIVATE relay_core z
+    target_link_libraries(rltest PRIVATE relay_core relay_dsp z
         "-framework OpenGL"
         "-framework AppKit"
     )
@@ -173,4 +210,84 @@ if(RELAY_BUILD_TOOLS AND APPLE)
     add_test(NAME relock     COMMAND rltest --relock)
     add_test(NAME crosstalk  COMMAND rltest --crosstalk)
     add_test(NAME mutation   COMMAND rltest --mutation)
+    add_test(NAME transition COMMAND rltest --transition)
+endif()
+
+endif()  # RELAY_BUILD_FFGL
+
+# ---------------------------------------------------------------------------
+# The OpenFX build, for Resolve, Vegas and the other hosts with a Transition
+# context. CPU render against the vendored OFX SDK subset under
+# external/openfx (C headers + the official C++ Support library, BSD-3).
+# relay_dsp links straight in, so the coil, the bounce schedule, the re-lock,
+# the crosstalk filter and the parameter conversions are the same code as the
+# FFGL build; only the per-pixel pass is written twice (Shaders.cpp and
+# Pass.cpp, marked `//= mirrored`).
+# ---------------------------------------------------------------------------
+option(BUILD_OFX "Build the OpenFX plugin" ON)
+
+if(BUILD_OFX)
+    set(OFX_SDK "${CMAKE_CURRENT_SOURCE_DIR}/external/openfx")
+
+    add_library(RelayOFX MODULE
+        source/ofx/RelayOFX.cpp
+        ${OFX_SDK}/Support/Library/ofxsCore.cpp
+        ${OFX_SDK}/Support/Library/ofxsImageEffect.cpp
+        ${OFX_SDK}/Support/Library/ofxsInteract.cpp
+        ${OFX_SDK}/Support/Library/ofxsLog.cpp
+        ${OFX_SDK}/Support/Library/ofxsMultiThread.cpp
+        ${OFX_SDK}/Support/Library/ofxsParams.cpp
+        ${OFX_SDK}/Support/Library/ofxsProperty.cpp
+        ${OFX_SDK}/Support/Library/ofxsPropertyValidation.cpp
+    )
+    # PRIVATE on an OBJECT library gives both the objects and the usage
+    # requirements. `$<TARGET_OBJECTS:relay_dsp>` would give the objects alone
+    # -- no include directories, no compile definitions.
+    target_link_libraries(RelayOFX PRIVATE relay_dsp)
+    target_include_directories(RelayOFX PRIVATE
+        source
+        "${OFX_SDK}/include"
+        "${OFX_SDK}/Support/include"
+    )
+    target_compile_definitions(RelayOFX PRIVATE
+        RELAY_VERSION="${PROJECT_VERSION}"
+        PLUGIN_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+        PLUGIN_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    )
+
+    # Threads, explicitly. The OFX Support library's multi-thread suite calls
+    # pthread_create, and on Rocky 8 -- glibc 2.28, the floor Resolve supports --
+    # that still lives in libpthread; libpthread was only folded into libc in
+    # glibc 2.34. Leave it out and the plugin compiles, links, passes a symbol
+    # check and a glibc-version check, and then fails at dlopen with "undefined
+    # symbol: pthread_create". macOS and Windows never show it.
+    find_package(Threads REQUIRED)
+    target_link_libraries(RelayOFX PRIVATE Threads::Threads)
+
+    set(OFX_BUNDLE_DIR "${CMAKE_BINARY_DIR}/Relay.ofx.bundle")
+    set_target_properties(RelayOFX PROPERTIES
+        PREFIX ""
+        SUFFIX ".ofx"
+        OUTPUT_NAME "Relay"
+        LIBRARY_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/MacOS"
+    )
+    if(APPLE)
+        set(OFX_BUNDLE_IDENTIFIER "com.stoatworks.relay.ofx")
+        configure_file(cmake/InfoOFX.plist.in
+            "${OFX_BUNDLE_DIR}/Contents/Info.plist" @ONLY)
+    elseif(WIN32)
+        set_target_properties(RelayOFX PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/Win64"
+            RUNTIME_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/Win64"
+            LIBRARY_OUTPUT_DIRECTORY_RELEASE "${OFX_BUNDLE_DIR}/Contents/Win64"
+            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OFX_BUNDLE_DIR}/Contents/Win64"
+            # MSVC's .exp/.lib for this target; its default directory collides
+            # with the FFGL target's, which shares the output base name, and a
+            # parallel build then races on the file (LNK1104).
+            ARCHIVE_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/importlib"
+            ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${OFX_BUNDLE_DIR}/importlib")
+    else()
+        set_target_properties(RelayOFX PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/Linux-x86-64")
+    endif()
 endif()

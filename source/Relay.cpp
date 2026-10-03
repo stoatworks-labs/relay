@@ -2,6 +2,7 @@
 
 #include "Controls.h"
 #include "Diag.h"
+#include "Frame.h"
 #include "Shaders.h"
 
 #include <algorithm>
@@ -49,16 +50,8 @@ int optionIndex( float value, int count )
 	return std::clamp( static_cast< int >( std::lround( value ) ), 0, count - 1 );
 }
 
-/// The re-lock is over when its envelope is below this fraction of the
-/// picture: at 4K that is 0.0004 of a row. The roll is then EXACTLY zero,
-/// so the selected input comes back bitwise.
-constexpr double kRollSettled = 1e-7;
-
-/// The line PLL's tear: its throw as a fraction of the width at a full
-/// roll, and how many lines it takes to catch up. A look, not a model.
-constexpr double kTearFraction = 0.03;
-constexpr double kTearLines    = 12.0;
-constexpr double kTearRollFull = 0.125;///< the roll at which the throw saturates
+//The settle threshold and the tear's constants live in Frame.h, because the
+//OpenFX build's frame logic (Transition.cpp) needs the same numbers.
 
 /// The frame period assumed when the host has shown only one frame, for
 /// the negative control that times the bounce in frames.
@@ -75,33 +68,37 @@ Relay::Relay()
 
 	//---------------------------------------------------------------------
 	// Defaults. SetParamInfof reads each one back out of GetFloatParameter,
-	// so these assignments are what the host is told the defaults are.
+	// so these assignments are what the host is told the defaults are. The
+	// values are Controls.h's HostValues, which the OpenFX build declares
+	// its defaults from too.
 	//---------------------------------------------------------------------
+	const HostValues defaults;
+
 	//Index 0, which Arena hides: PAL is the value it must hold for ever.
-	params[ PT_STANDARD ]     = static_cast< float >( kPAL );
-	params[ PT_SWITCH_POINT ] = static_cast< float >( kAnywhere );
+	params[ PT_STANDARD ]     = defaults.standard;
+	params[ PT_SWITCH_POINT ] = defaults.switchPoint;
 
 	//The coil energised: a mixer dropped on a layer at full opacity shows
 	//this layer. In Resolume the layer's opacity fader overrides it from the
 	//first frame.
-	params[ PT_OPACITY ]  = 1.0f;
-	params[ PT_PULL_IN ]  = 0.7f;
-	params[ PT_DROP_OUT ] = 0.3f;
-	params[ PT_OPERATE ]  = ParamForOperateSeconds( 0.008 );
-	params[ PT_SELECT ]   = 0.0f;
+	params[ PT_OPACITY ]  = defaults.opacity;
+	params[ PT_PULL_IN ]  = defaults.pullIn;
+	params[ PT_DROP_OUT ] = defaults.dropOut;
+	params[ PT_OPERATE ]  = defaults.operate;
+	params[ PT_SELECT ]   = defaults.select;
 	params[ PT_TAKE ]     = 0.0f;
 
-	params[ PT_BOUNCE_TIME ] = ParamForBounceSeconds( 0.001 );
-	params[ PT_RESTITUTION ] = ParamForRestitution( 0.45 );
-	params[ PT_OPEN_LEVEL ]  = 0.0f;
+	params[ PT_BOUNCE_TIME ] = defaults.bounceTime;
+	params[ PT_RESTITUTION ] = defaults.restitution;
+	params[ PT_OPEN_LEVEL ]  = defaults.openLevel;
 
-	params[ PT_GENLOCKED ]    = 0.0f;
-	params[ PT_PHASE_OFFSET ] = 0.25f;
-	params[ PT_LOCK_TIME ]    = 0.5f;//0.316 s
-	params[ PT_DAMPING ]      = 0.5f;//zeta 0.447
+	params[ PT_GENLOCKED ]    = defaults.genlocked;
+	params[ PT_PHASE_OFFSET ] = defaults.phaseOffset;
+	params[ PT_LOCK_TIME ]    = defaults.lockTime;
+	params[ PT_DAMPING ]      = defaults.damping;
 
-	params[ PT_CROSSTALK ] = 0.0f;
-	params[ PT_CORNER ]    = ParamForCornerHz( 1.0e6 );
+	params[ PT_CROSSTALK ] = defaults.crosstalk;
+	params[ PT_CORNER ]    = defaults.corner;
 
 	//---------------------------------------------------------------------
 	// Declaration. Every ranged parameter is a plain 0..1 float, with the
@@ -380,8 +377,7 @@ FFResult Relay::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 		const double wn    = NaturalFrequencyFromParam( params[ PT_LOCK_TIME ] );
 		const double zeta  = DampingFromParam( params[ PT_DAMPING ] );
 		const double t     = now - rollStart;
-		const double rate  = RelockSlowestRate( wn, zeta );
-		const double settleAfter = std::log( std::max( 2.0 * phi, kRollSettled ) / kRollSettled ) / std::max( rate, 1e-9 );
+		const double settleAfter = frame::SettleAfter( phi, wn, zeta );
 		if( t > settleAfter || phi <= 0.0 )
 			rollActive = false;
 		else
@@ -391,7 +387,7 @@ FFResult Relay::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 			roll = rollSign * phi * g;
 		}
 	}
-	const double tearAmp = kTearFraction * std::clamp( roll / kTearRollFull, -1.0, 1.0 );
+	const double tearAmp = frame::TearAmp( roll );
 
 	//-----------------------------------------------------------------
 	// The crosstalk filter for this raster.
@@ -414,6 +410,24 @@ FFResult Relay::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	lastState.cross        = cross;
 	lastState.standard     = standardIndex;
 	lastNow                = now;
+
+	//-----------------------------------------------------------------
+	// The frame as the pass is handed it. The uniforms below are set from
+	// this and nothing else, and the OpenFX build hands the C++ pass the
+	// same struct -- which is what lets the harness put the two passes side
+	// by side on one plan.
+	//-----------------------------------------------------------------
+	frame::Plan& plan  = lastState.plan;
+	plan.activeLines   = standard.activeLines;
+	plan.state0        = state0;
+	plan.cuts          = lastState.cuts;
+	plan.cutStates     = lastState.cutStates;
+	plan.openLevel     = std::clamp( params[ PT_OPEN_LEVEL ], 0.0f, 1.0f );
+	plan.rolledSource  = lastState.rolledSource;
+	plan.roll          = roll;
+	plan.tearAmp       = tearAmp;
+	plan.tearLines     = frame::kTearLines;
+	plan.cross         = cross;
 
 	//-----------------------------------------------------------------
 	// Bind both inputs. The declaration ORDER matters: every
@@ -441,31 +455,31 @@ FFResult Relay::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	glUniform2i( shader.FindUniform( "SizeB" ), static_cast< GLint >( b.Width ), static_cast< GLint >( b.Height ) );
 	glUniform2i( shader.FindUniform( "OutSize" ), outW, outH );
 
-	shader.Set( "ActiveLines", standard.activeLines );
-	shader.Set( "State0", state0 );
-	shader.Set( "CutCount", static_cast< int >( lastState.cuts.size() ) );
-	if( !lastState.cuts.empty() )
+	shader.Set( "ActiveLines", plan.activeLines );
+	shader.Set( "State0", plan.state0 );
+	shader.Set( "CutCount", static_cast< int >( plan.cuts.size() ) );
+	if( !plan.cuts.empty() )
 	{
 		float packedCuts[ kMaxCuts * 3 ];
-		for( size_t i = 0; i < lastState.cuts.size(); ++i )
+		for( size_t i = 0; i < plan.cuts.size(); ++i )
 		{
-			packedCuts[ i * 3 + 0 ] = static_cast< float >( lastState.cuts[ i ].line );
-			packedCuts[ i * 3 + 1 ] = static_cast< float >( lastState.cuts[ i ].xfrac );
-			packedCuts[ i * 3 + 2 ] = static_cast< float >( lastState.cutStates[ i ] );
+			packedCuts[ i * 3 + 0 ] = static_cast< float >( plan.cuts[ i ].line );
+			packedCuts[ i * 3 + 1 ] = static_cast< float >( plan.cuts[ i ].xfrac );
+			packedCuts[ i * 3 + 2 ] = static_cast< float >( plan.cutStates[ i ] );
 		}
-		glUniform3fv( shader.FindUniform( "Cuts" ), static_cast< GLsizei >( lastState.cuts.size() ), packedCuts );
+		glUniform3fv( shader.FindUniform( "Cuts" ), static_cast< GLsizei >( plan.cuts.size() ), packedCuts );
 	}
-	shader.Set( "OpenLevel", std::clamp( params[ PT_OPEN_LEVEL ], 0.0f, 1.0f ) );
+	shader.Set( "OpenLevel", plan.openLevel );
 
-	shader.Set( "RolledSource", lastState.rolledSource );
-	shader.Set( "Roll", static_cast< float >( roll ) );
-	shader.Set( "TearAmp", static_cast< float >( tearAmp ) );
-	shader.Set( "TearLines", static_cast< float >( kTearLines ) );
+	shader.Set( "RolledSource", plan.rolledSource );
+	shader.Set( "Roll", static_cast< float >( plan.roll ) );
+	shader.Set( "TearAmp", static_cast< float >( plan.tearAmp ) );
+	shader.Set( "TearLines", static_cast< float >( plan.tearLines ) );
 
-	shader.Set( "CrossGain", static_cast< float >( cross.gain ) );
-	shader.Set( "CrossDecay", static_cast< float >( cross.a ) );
-	shader.Set( "CrossTaps", cross.taps );
-	shader.Set( "CrossNorm", static_cast< float >( cross.norm ) );
+	shader.Set( "CrossGain", static_cast< float >( plan.cross.gain ) );
+	shader.Set( "CrossDecay", static_cast< float >( plan.cross.a ) );
+	shader.Set( "CrossTaps", plan.cross.taps );
+	shader.Set( "CrossNorm", static_cast< float >( plan.cross.norm ) );
 
 	shader.Set( "Fault", fault );
 

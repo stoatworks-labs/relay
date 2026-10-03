@@ -19,7 +19,9 @@
         rltest --relock                 the roll is the second-order step response
         rltest --crosstalk              the leak rises 6 dB an octave below the corner
         rltest --mutation               one character of the shipped GLSL fails a check
-        rltest --bench                  ms/frame at 720p through 4K
+        rltest --transition             the OpenFX build's curve reading, frame logic and C++ pass
+                                        against this build, frame by frame and pixel by pixel
+        rltest --bench                  ms/frame at 720p through 4K, the GPU and the C++ pass
         rltest --pipe                   raw frames in, raw frames out (two inputs)
 
     RLTEST_RENDERER=software in the environment renders on Apple's software
@@ -51,10 +53,12 @@
 
 #include "Controls.h"
 #include "Model.h"
+#include "Pass.h"
 #include "Raster.h"
 #include "Relay.h"
 #include "Shaders.h"
 #include "Timing.h"
+#include "Transition.h"
 
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
@@ -69,9 +73,11 @@
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -1840,6 +1846,449 @@ int runMutation()
 }
 
 //---------------------------------------------------------------------------
+// --transition: the OpenFX build's two halves against this build.
+//
+// The OpenFX plugin is a Transition, and ofxprobe instantiates the Filter
+// context only, so its two halves are checked here, where the FFGL plugin
+// they must agree with is:
+//
+//   the curve    transition::CoilHistory against closed forms. A ramp pulls
+//                in where Pull-in x duration says; a curve that comes back
+//                down drops out at Drop-out and not at Pull-in; a reversed
+//                one starts energised; a flat one never switches; a step
+//                lands exactly on its frame; a host that refuses times
+//                outside the transition changes nothing.
+//   the frame    transition::PlanFromCurve, fed the cue sheet as a curve,
+//                against the plan the FFGL plugin's own state machine handed
+//                its shader on the same frame: the starting contact, every
+//                cut (line, fraction, state), the roll, the tear and the
+//                crosstalk filter, compared EXACTLY -- both are the same
+//                double arithmetic, so any difference is a difference.
+//   the pixels   pass::Render on that plan against the GPU's render of the
+//                same frame. Away from a cut the only differences are the
+//                GPU's own: its bilinear weights and float rounding, which
+//                move a pixel by at most one 8-bit code. On a cut's own line,
+//                within one pixel of the cut, the GPU's interpolated uv.x
+//                (good to 1 part in 10^5 on the software renderer) can put
+//                the pixel on the other side -- counted, as --bounce counts
+//                them, and not asserted.
+//
+// Each with a negative control the comparison must reject.
+//---------------------------------------------------------------------------
+
+/// One cue: the FFGL plugin's Opacity from this frame on.
+struct Cue
+{
+	int frame;
+	float value;
+};
+
+/// The cue sheet as the OpenFX build's Transition curve: the value of the
+/// last cue at or before each whole frame, held until the next. A step at
+/// frame k is first met AT k, so the bisection lands on k exactly -- the
+/// time the FFGL plugin, which reads its fader once a frame, sees it.
+double cueCurve( const std::vector< Cue >& cues, double t )
+{
+	//No epsilon: a whole frame is an exact double, and the step must be AT it.
+	const int frame = static_cast< int >( std::floor( t ) );
+	float value     = cues.empty() ? 0.0f : cues.front().value;
+	for( const Cue& c : cues )
+		if( c.frame <= frame )
+			value = c.value;
+	return value;
+}
+
+/// The plugin's parameters as the OpenFX build would read them: the same
+/// floats, in host units.
+HostValues hostOf( Relay& plugin )
+{
+	HostValues h;
+	h.standard    = plugin.GetFloatParameter( Relay::PT_STANDARD );
+	h.switchPoint = plugin.GetFloatParameter( Relay::PT_SWITCH_POINT );
+	h.opacity     = plugin.GetFloatParameter( Relay::PT_OPACITY );
+	h.pullIn      = plugin.GetFloatParameter( Relay::PT_PULL_IN );
+	h.dropOut     = plugin.GetFloatParameter( Relay::PT_DROP_OUT );
+	h.operate     = plugin.GetFloatParameter( Relay::PT_OPERATE );
+	h.select      = plugin.GetFloatParameter( Relay::PT_SELECT );
+	h.bounceTime  = plugin.GetFloatParameter( Relay::PT_BOUNCE_TIME );
+	h.restitution = plugin.GetFloatParameter( Relay::PT_RESTITUTION );
+	h.openLevel   = plugin.GetFloatParameter( Relay::PT_OPEN_LEVEL );
+	h.genlocked   = plugin.GetFloatParameter( Relay::PT_GENLOCKED );
+	h.phaseOffset = plugin.GetFloatParameter( Relay::PT_PHASE_OFFSET );
+	h.lockTime    = plugin.GetFloatParameter( Relay::PT_LOCK_TIME );
+	h.damping     = plugin.GetFloatParameter( Relay::PT_DAMPING );
+	h.crosstalk   = plugin.GetFloatParameter( Relay::PT_CROSSTALK );
+	h.corner      = plugin.GetFloatParameter( Relay::PT_CORNER );
+	return h;
+}
+
+/// Where two plans differ, or "" when they are the same plan.
+std::string planDifference( const relay::frame::Plan& gpu, const relay::frame::Plan& cpu )
+{
+	if( gpu.activeLines != cpu.activeLines )
+		return fmt( "active lines %.0f vs %.0f", gpu.activeLines, cpu.activeLines );
+	if( gpu.state0 != cpu.state0 )
+		return fmt( "starting contact %.0f vs %.0f", gpu.state0, cpu.state0 );
+	if( gpu.cuts.size() != cpu.cuts.size() )
+		return fmt( "%.0f cuts vs %.0f", static_cast< double >( gpu.cuts.size() ), static_cast< double >( cpu.cuts.size() ) );
+	for( size_t i = 0; i < gpu.cuts.size(); ++i )
+		if( gpu.cuts[ i ].line != cpu.cuts[ i ].line || gpu.cuts[ i ].xfrac != cpu.cuts[ i ].xfrac
+		    || gpu.cutStates[ i ] != cpu.cutStates[ i ] )
+			return fmt( "cut %.0f: line %.0f at %.17g", static_cast< double >( i ), gpu.cuts[ i ].line, gpu.cuts[ i ].xfrac )
+			       + fmt( " vs line %.0f at %.17g", cpu.cuts[ i ].line, cpu.cuts[ i ].xfrac );
+	if( gpu.openLevel != cpu.openLevel )
+		return fmt( "open level %.9g vs %.9g", gpu.openLevel, cpu.openLevel );
+	if( gpu.rolledSource != cpu.rolledSource )
+		return fmt( "rolled source %.0f vs %.0f", gpu.rolledSource, cpu.rolledSource );
+	if( gpu.roll != cpu.roll )
+		return fmt( "roll %.17g vs %.17g", gpu.roll, cpu.roll );
+	if( gpu.tearAmp != cpu.tearAmp || gpu.tearLines != cpu.tearLines )
+		return fmt( "tear %.17g vs %.17g", gpu.tearAmp, cpu.tearAmp );
+	if( gpu.cross.gain != cpu.cross.gain || gpu.cross.a != cpu.cross.a || gpu.cross.taps != cpu.cross.taps
+	    || gpu.cross.norm != cpu.cross.norm )
+		return fmt( "crosstalk gain %.17g vs %.17g", gpu.cross.gain, cpu.cross.gain );
+	return "";
+}
+
+/// The C++ pass over 8-bit inputs, quantised the way the GL quantises its
+/// float output into an RGBA8 framebuffer.
+Image passRender( const relay::frame::Plan& plan, const Image& a, int aw, int ah, const Image& b, int bw, int bh, int W, int H )
+{
+	std::vector< float > fa( a.size() ), fb( b.size() ), out( static_cast< size_t >( W ) * H * 4 );
+	for( size_t i = 0; i < a.size(); ++i )
+		fa[ i ] = a[ i ] / 255.0f;
+	for( size_t i = 0; i < b.size(); ++i )
+		fb[ i ] = b[ i ] / 255.0f;
+	relay::pass::Render( plan, { fa.data(), aw, ah }, { fb.data(), bw, bh }, out.data(), W, H, 0, H );
+	Image bytes( out.size() );
+	for( size_t i = 0; i < out.size(); ++i )
+		bytes[ i ] = toByte( out[ i ] );
+	return bytes;
+}
+
+/// Within one pixel of a cut, on the cut's own line: where the GPU's
+/// interpolated uv.x decides the side.
+bool atCut( const relay::frame::Plan& plan, int x, int y, int W, int H )
+{
+	const int row  = H - 1 - y;//y is bottom-up
+	const int line = ( row * plan.activeLines ) / H;
+	const double u = ( x + 0.5 ) / W;
+	for( const raster::Cut& cut : plan.cuts )
+		if( cut.line == line && std::fabs( u - cut.xfrac ) <= 1.0 / W )
+			return true;
+	return false;
+}
+
+struct PixelTally
+{
+	long pixels    = 0;
+	long differ    = 0;///< by any amount
+	long atCuts    = 0;///< by more than one code, within a pixel of a cut
+	long away      = 0;///< by more than one code, anywhere else
+	int worst      = 0;///< worst channel, in codes, over every pixel
+	int worstAway  = 0;///< worst channel away from a cut
+};
+
+void tallyPixels( const Image& gpu, const Image& cpu, const relay::frame::Plan& plan, int W, int H, PixelTally& t )
+{
+	for( int y = 0; y < H; ++y )
+		for( int x = 0; x < W; ++x )
+		{
+			const size_t at = ( static_cast< size_t >( y ) * W + x ) * 4;
+			int worst       = 0;
+			for( int c = 0; c < 4; ++c )
+				worst = std::max( worst, std::abs( static_cast< int >( gpu[ at + c ] ) - static_cast< int >( cpu[ at + c ] ) ) );
+			++t.pixels;
+			if( worst == 0 )
+				continue;
+			++t.differ;
+			t.worst        = std::max( t.worst, worst );
+			const bool cut = atCut( plan, x, y, W, H );
+			if( !cut )
+				t.worstAway = std::max( t.worstAway, worst );
+			if( worst > 1 )
+				++( cut ? t.atCuts : t.away );
+		}
+}
+
+struct TransitionScenario
+{
+	const char* name;
+	std::vector< std::pair< std::string, float > > settings;
+	std::vector< Cue > opacity;
+	std::vector< int > compare;///< the frames compared; every frame up to the last is rendered
+	InputSpec a, b;            ///< zero size: the output's
+};
+
+int transitionScenario( const TransitionScenario& s, int W, int H, int& planFrames, PixelTally& pixels )
+{
+	const InputSpec a = s.a.usedW > 0 ? s.a : InputSpec::Exact( W, H );
+	const InputSpec b = s.b.usedW > 0 ? s.b : InputSpec::Exact( W, H );
+	Rig rig;
+	if( !rig.Init( W, H, a, b ) )
+		return 1;
+	const Image aCard = videoCard( a.usedW, a.usedH );
+	const Image bCard = graphicCard( b.usedW, b.usedH );
+	rig.UploadA( aCard );
+	rig.UploadB( bCard );
+	for( const auto& setting : s.settings )
+		if( !rig.Set( setting.first, setting.second ) )
+			return 1;
+
+	const auto curve = [ &s ]( double t ) { return cueCurve( s.opacity, t ); };
+	const int last   = *std::max_element( s.compare.begin(), s.compare.end() );
+	int mismatched   = 0;
+	std::string firstMismatch;
+	for( int frame = 0; frame <= last; ++frame )
+	{
+		rig.Set( "Opacity", static_cast< float >( cueCurve( s.opacity, frame ) ) );
+		if( !rig.Render( frame ) )
+			return 1;
+		if( std::find( s.compare.begin(), s.compare.end(), frame ) == s.compare.end() )
+			continue;
+
+		const relay::frame::Plan& gpuPlan = rig.plugin.StateForTest().plan;
+		const relay::frame::Plan cpuPlan =
+			relay::transition::PlanFromCurve( curve, 0.0, frame, kFps, hostOf( rig.plugin ), W );
+		const std::string difference = planDifference( gpuPlan, cpuPlan );
+		++planFrames;
+		if( !difference.empty() )
+		{
+			++mismatched;
+			if( firstMismatch.empty() )
+				firstMismatch = fmt( "frame %.0f: ", frame ) + difference;
+		}
+		tallyPixels( rig.Pixels(), passRender( cpuPlan, aCard, a.usedW, a.usedH, bCard, b.usedW, b.usedH, W, H ), cpuPlan,
+		             W, H, pixels );
+	}
+	Check( mismatched == 0, std::string( s.name ) + fmt( " %.0fx%.0f: ", W, H )
+	                            + fmt( "%.0f frames, the plan from the curve is the FFGL plugin's plan exactly", static_cast< double >( s.compare.size() ) )
+	                            + ( firstMismatch.empty() ? "" : " -- " + firstMismatch ) );
+	return 0;
+}
+
+/// The coil over closed-form curves.
+void curveChecks()
+{
+	using relay::transition::CoilHistory;
+	using relay::transition::CoilRecord;
+	//2^-32 of a one-frame bracket is 2.3e-10 frames; the assertion is 1e-9.
+	const double tol = 1e-9;
+	const double D   = 50.0;
+	const double pin = 0.725, drop = 0.275;
+
+	const auto at = [ & ]( const CoilRecord& r, size_t i ) { return i < r.events.size() ? r.events[ i ].time : -1.0; };
+
+	{
+		const CoilRecord r = CoilHistory( [ & ]( double t ) { return t / D; }, 0.0, D, pin, drop );
+		Check( !r.initialOn && r.events.size() == 1 && r.events[ 0 ].on && std::fabs( at( r, 0 ) - pin * D ) <= tol,
+		       fmt( "a 0 -> 1 ramp over %.0f frames pulls in once, at frame %.10f (Pull-in x duration: %.10f)", D, at( r, 0 ), pin * D ) );
+	}
+	{
+		//Up to 1 at frame 30 and back to 0 at 60: up at Pull-in on the way
+		//up, down at Drop-out on the way down -- not at Pull-in, which the
+		//falling curve passes at 38.25.
+		const auto tri = [ & ]( double t ) { return t <= 30.0 ? t / 30.0 : ( 60.0 - t ) / 30.0; };
+		const CoilRecord r = CoilHistory( tri, 0.0, 60.0, pin, drop );
+		const double up = pin * 30.0, down = 60.0 - drop * 30.0;
+		Check( r.events.size() == 2 && r.events[ 0 ].on && !r.events[ 1 ].on && std::fabs( at( r, 0 ) - up ) <= tol
+		           && std::fabs( at( r, 1 ) - down ) <= tol,
+		       fmt( "up and back down: pulls in at %.6f (%.6f), drops out at %.6f (Drop-out's %.6f)", at( r, 0 ), up, at( r, 1 ), down ) );
+		//The negative control: no hysteresis drops out where the curve
+		//re-crosses Pull-in, 13.5 frames early.
+		const CoilRecord flat = CoilHistory( tri, 0.0, 60.0, pin, pin );
+		Negative( flat.events.size() == 2 && std::fabs( at( flat, 1 ) - down ) > 1.0,
+		          fmt( "with Drop-out at Pull-in the drop moves to frame %.6f", at( flat, 1 ) ) );
+	}
+	{
+		//A reversed transition, 1 -> 0: the coil is energised from the first
+		//reading -- no switch at the start -- and drops at Drop-out.
+		const CoilRecord r = CoilHistory( [ & ]( double t ) { return 1.0 - t / D; }, 0.0, D, pin, drop );
+		Check( r.initialOn && r.events.size() == 1 && !r.events[ 0 ].on && std::fabs( at( r, 0 ) - ( 1.0 - drop ) * D ) <= tol,
+		       fmt( "a reversed transition starts energised and drops out once, at %.6f (%.6f)", at( r, 0 ), ( 1.0 - drop ) * D ) );
+	}
+	{
+		const CoilRecord r = CoilHistory( []( double ) { return 0.5; }, 0.0, D, pin, drop );
+		Check( !r.initialOn && r.events.empty(), "a flat curve between the thresholds never switches" );
+	}
+	{
+		//A crossing while a frame is being scanned cuts THAT frame, at the line
+		//the scan had reached: a ramp crossing Pull-in 0.3 frames (5 ms at 60
+		//fps) after frame 10 starts, with Operate 0, breaks on PAL line
+		//floor( 5 ms / 64 us ) = 78 of frame 10. The FFGL plugin, reading its
+		//fader at frame starts, would cut frame 11 instead.
+		HostValues h;
+		h.operate   = 0.0f;
+		h.genlocked = 1.0f;
+		const double crossAt = 10.3;
+		const auto ramp      = [ & ]( double t ) { return static_cast< double >( h.pullIn ) * t / crossAt; };
+		const relay::frame::Plan plan = relay::transition::PlanFromCurve( ramp, 0.0, 10.0, kFps, h, 640 );
+		const relay::frame::Plan before = relay::transition::PlanFromCurve( ramp, 0.0, 9.0, kFps, h, 640 );
+		const int wantLine = static_cast< int >( std::floor( ( crossAt - 10.0 ) / kFps / raster::StandardOf( kPAL ).line ) );
+		Check( before.cuts.empty() && plan.state0 == kContactA && !plan.cuts.empty() && plan.cuts.front().line == wantLine,
+		       fmt( "a crossing 5 ms into frame 10's scan cuts frame 10 at line %.0f (predicted %.0f), frame 9 not at all",
+		            plan.cuts.empty() ? -1.0 : plan.cuts.front().line, wantLine ) );
+	}
+	{
+		//A step: first met AT frame 7, so the switch is at 7 exactly.
+		const std::vector< Cue > cues = { { 0, 0.0f }, { 7, 1.0f } };
+		const CoilRecord r = CoilHistory( [ & ]( double t ) { return cueCurve( cues, t ); }, 0.0, 12.0, pin, drop );
+		Check( r.events.size() == 1 && at( r, 0 ) == 7.0, fmt( "a step at frame 7 switches at exactly %.17g", at( r, 0 ) ) );
+	}
+	{
+		//A host that refuses times outside the transition (NaN), with the
+		//read-back starting a whole duration early: the same one switch.
+		const auto refusing = [ & ]( double t ) {
+			return t < 0.0 || t > D ? std::numeric_limits< double >::quiet_NaN() : t / D;
+		};
+		const CoilRecord r = CoilHistory( refusing, -D, D, pin, drop );
+		Check( !r.initialOn && r.events.size() == 1 && std::fabs( at( r, 0 ) - pin * D ) <= tol,
+		       fmt( "a host that refuses times outside the transition: still one switch, at %.6f", at( r, 0 ) ) );
+	}
+}
+
+int runTransition()
+{
+	std::printf( "the OpenFX build's curve reading, frame logic and C++ pass, against this build\n\n" );
+
+	std::printf( "  the coil over a Transition curve\n" );
+	curveChecks();
+
+	//The scenarios. Every one renders every frame up to its last through the
+	//real plugin, so its state machine runs as it does in Resolume, and
+	//compares the frames listed.
+	const std::vector< TransitionScenario > scenarios = {
+		//The defaults, not genlocked: the 8 ms operate lands the break
+		//mid-frame, the bounce, then the roll until it settles (frame ~115).
+		{ "defaults", {}, { { 0, 0.0f }, { 2, 1.0f } }, { 0, 1, 2, 3, 4, 5, 8, 12, 20, 40, 80, 110, 120, 130 }, {}, {} },
+		//Down, not up, on NTSC: primed energised on B, dropped to A at frame 3,
+		//a long bounce, a grey open contact, crosstalk on, overdamped.
+		{ "drop-out NTSC",
+		  { { "Standard", static_cast< float >( kNTSC ) },
+		    { "Operate Time", ParamForOperateSeconds( 0.004 ) },
+		    { "Bounce Time", ParamForBounceSeconds( 0.004 ) },
+		    { "Restitution", ParamForRestitution( 0.8 ) },
+		    { "Open Level", 0.35f },
+		    { "Crosstalk", 0.6f },
+		    { "Corner", ParamForCornerHz( 2.0e6 ) },
+		    { "Damping", ParamForDamping( 2.0 ) } },
+		  { { 0, 1.0f }, { 3, 0.2f } },
+		  { 0, 1, 2, 3, 4, 5, 6, 8, 10, 16 },
+		  {},
+		  {} },
+		//Vertical Interval, Select inverted, genlocked: up at 2 and down at 8.
+		{ "vertical interval",
+		  { { "Switch Point", static_cast< float >( kVerticalInterval ) },
+		    { "Operate Time", ParamForOperateSeconds( 0.0097 ) },
+		    { "Bounce Time", ParamForBounceSeconds( 0.002 ) },
+		    { "Restitution", ParamForRestitution( 0.6 ) },
+		    { "Select", 1.0f },
+		    { "Genlocked", 1.0f } },
+		  { { 0, 0.0f }, { 2, 1.0f }, { 8, 0.0f } },
+		  { 0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11 },
+		  {},
+		  {} },
+		//A switch during a switch: a 40 ms bounce, the coil back down a frame
+		//later and up again the frame after, all inside the first bounce.
+		//Operate 2 ms and not 0: at 60 fps a PAL scan (18.4 ms) overlaps the
+		//next frame's start by 1.8 ms, and a break in that overlap is in this
+		//frame's scan -- which the OpenFX build, reading the curve to the end
+		//of the scan, shows and the FFGL plugin, reading its fader at the
+		//frame's start, cannot. --transition checks that case on its own.
+		{ "switch during a switch",
+		  { { "Operate Time", ParamForOperateSeconds( 0.002 ) },
+		    { "Bounce Time", ParamForBounceSeconds( 0.004 ) },
+		    { "Restitution", ParamForRestitution( 0.9 ) },
+		    { "Crosstalk", 0.3f } },
+		  { { 0, 0.0f }, { 2, 1.0f }, { 3, 0.0f }, { 4, 1.0f } },
+		  { 1, 2, 3, 4, 5, 6, 8, 12, 30 },
+		  {},
+		  {} },
+		//Two inputs of two sizes, both padded as Resolume pads them: each is
+		//stretched over the output, in the GPU by its own MaxUV and in the C++
+		//pass by its own size.
+		{ "two sizes, padded",
+		  { { "Crosstalk", 0.5f } },
+		  { { 0, 0.0f }, { 2, 1.0f } },
+		  { 1, 2, 3, 4, 6, 20 },
+		  InputSpec::Padded( 200, 120, 256, 256 ),
+		  InputSpec::Padded( 96, 70, 128, 128 ) },
+	};
+
+	const int rasters[ 2 ][ 2 ] = { { 640, 360 }, { 320, 180 } };
+	PixelTally all;
+	int planFrames = 0;
+	for( const auto& r : rasters )
+	{
+		std::printf( "\n  %dx%d\n", r[ 0 ], r[ 1 ] );
+		for( const TransitionScenario& s : scenarios )
+		{
+			PixelTally t;
+			if( transitionScenario( s, r[ 0 ], r[ 1 ], planFrames, t ) != 0 )
+				return 1;
+			Check( t.away == 0 && t.worstAway <= 1,
+			       std::string( s.name ) + fmt( ": the C++ pass is the GPU's picture -- worst %.0f/255 away from a cut, %.0f of %.0f pixels differ at all", t.worstAway, t.differ, t.pixels )
+			           + fmt( ", %.0f by more than one code, all %.0f within a pixel of a cut", t.atCuts + t.away, t.atCuts ) );
+			all.pixels += t.pixels;
+			all.differ += t.differ;
+			all.atCuts += t.atCuts;
+			all.away += t.away;
+			all.worst     = std::max( all.worst, t.worst );
+			all.worstAway = std::max( all.worstAway, t.worstAway );
+		}
+	}
+	std::printf( "\n  over %d frames: worst %d/255 away from a cut (%d/255 anywhere); %ld of %ld pixels differ, %ld by more than one code (%ld at a cut)\n",
+	             planFrames, all.worstAway, all.worst, all.differ, all.pixels, all.atCuts + all.away, all.atCuts );
+
+	//-----------------------------------------------------------------
+	// Negative controls. Each comparison must be able to fail.
+	//-----------------------------------------------------------------
+	std::printf( "\n  negative controls\n" );
+	{
+		//The plan: the curve a frame late must not be the plugin's plan.
+		Rig rig;
+		if( !rig.Init( 320, 180 ) )
+			return 1;
+		rig.Set( "Opacity", 0.0f );
+		rig.Render( 0 );
+		rig.Render( 1 );
+		rig.Set( "Opacity", 1.0f );
+		rig.Render( 2 );
+		const std::vector< Cue > late = { { 0, 0.0f }, { 3, 1.0f } };
+		const relay::frame::Plan wrong = relay::transition::PlanFromCurve(
+			[ & ]( double t ) { return cueCurve( late, t ); }, 0.0, 2.0, kFps, hostOf( rig.plugin ), 320 );
+		Negative( !planDifference( rig.plugin.StateForTest().plan, wrong ).empty(),
+		          "the curve a frame late is not the plugin's plan (" + planDifference( rig.plugin.StateForTest().plan, wrong ) + ")" );
+
+	}
+	{
+		//The pixels: the switching frame with twice the bounce must not pass
+		//for the GPU's.
+		Rig rig;
+		if( !rig.Init( 320, 180 ) )
+			return 1;
+		const Image aCard = videoCard( 320, 180 ), bCard = graphicCard( 320, 180 );
+		rig.UploadA( aCard );
+		rig.UploadB( bCard );
+		rig.Set( "Opacity", 0.0f );
+		rig.Render( 0 );
+		rig.Render( 1 );
+		rig.Set( "Opacity", 1.0f );
+		rig.Render( 2 );
+		const Image gpu = rig.Pixels();
+		HostValues h    = hostOf( rig.plugin );
+		h.bounceTime    = std::min( 1.0f, 2.0f * h.bounceTime );
+		const std::vector< Cue > cues = { { 0, 0.0f }, { 2, 1.0f } };
+		const relay::frame::Plan doubled =
+			relay::transition::PlanFromCurve( [ & ]( double t ) { return cueCurve( cues, t ); }, 0.0, 2.0, kFps, h, 320 );
+		PixelTally t;
+		tallyPixels( gpu, passRender( doubled, aCard, 320, 180, bCard, 320, 180, 320, 180 ), doubled, 320, 180, t );
+		Negative( t.away > 0, fmt( "twice the bounce: %.0f pixels off by more than one code away from any cut", t.away ) );
+	}
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
 // --bench
 //---------------------------------------------------------------------------
 double benchAt( int width, int height, int frames, double fps, float crosstalk )
@@ -1860,6 +2309,46 @@ double benchAt( int width, int height, int frames, double fps, float crosstalk )
 	for( int frame = 0; frame < frames; ++frame )
 		rig.Render( warmup + frame, fps );
 	glFinish();
+	const auto end = std::chrono::steady_clock::now();
+	return std::chrono::duration< double >( end - start ).count() * 1000.0 / frames;
+}
+
+/// The OpenFX build's render, without a host: the C++ pass over float
+/// inputs, its rows split over every core as the host's thread suite splits
+/// them. `switching` puts the defaults' switching frame (cuts, a roll) in it.
+double passBenchAt( int width, int height, int frames, float crosstalk, bool switching, unsigned threads )
+{
+	std::vector< float > a( static_cast< size_t >( width ) * height * 4 ), b( a.size() ), out( a.size() );
+	const Image aCard = videoCard( width, height ), bCard = graphicCard( width, height );
+	for( size_t i = 0; i < a.size(); ++i )
+	{
+		a[ i ] = aCard[ i ] / 255.0f;
+		b[ i ] = bCard[ i ] / 255.0f;
+	}
+	HostValues host;
+	host.crosstalk = crosstalk;
+	host.genlocked = switching ? 0.0f : 1.0f;
+	const auto curve = [ & ]( double t ) { return t >= 2.0 - 1e-9 ? 1.0 : 0.0; };
+	const relay::frame::Plan plan = relay::transition::PlanFromCurve( curve, 0.0, switching ? 2.0 : 30.0, kFps, host, width );
+
+	const auto once = [ & ]() {
+		std::vector< std::thread > pool;
+		for( unsigned i = 0; i < threads; ++i )
+		{
+			const int y0 = static_cast< int >( static_cast< long long >( height ) * i / threads );
+			const int y1 = static_cast< int >( static_cast< long long >( height ) * ( i + 1 ) / threads );
+			pool.emplace_back( [ &, y0, y1 ]() {
+				relay::pass::Render( plan, { a.data(), width, height }, { b.data(), width, height }, out.data(), width, height, y0, y1 );
+			} );
+		}
+		for( std::thread& t : pool )
+			t.join();
+	};
+	for( int i = 0; i < 3; ++i )
+		once();
+	const auto start = std::chrono::steady_clock::now();
+	for( int i = 0; i < frames; ++i )
+		once();
 	const auto end = std::chrono::steady_clock::now();
 	return std::chrono::duration< double >( end - start ).count() * 1000.0 / frames;
 }
@@ -1887,6 +2376,22 @@ int runBench( int frames, double fps )
 			return 1;
 		std::printf( "%s    %7.3f       %8.0f            %5.1f%%             |   %7.3f     %5.1f%%\n", size.name, ms, ms > 0.0 ? 1000.0 / ms : 0.0,
 		             ms / 16.667 * 100.0, xt, xt / 16.667 * 100.0 );
+	}
+
+	//The OpenFX build's pass, on the CPU: the pixels alone, without the
+	//host's marshalling either side of them.
+	const unsigned cores = std::max( 1u, std::thread::hardware_concurrency() );
+	const int passFrames = std::max( 5, frames / 4 );
+	std::printf( "\nThe C++ pass (the OpenFX render's pixels), %d frames each on %u threads, then on 1:\n\n", passFrames, cores );
+	std::printf( "resolution     at rest   switching   Crosstalk 1   | 1 thread: at rest   Crosstalk 1   (ms/frame)\n" );
+	for( const Size& size : sizes )
+	{
+		const double rest  = passBenchAt( size.width, size.height, passFrames, 0.0f, false, cores );
+		const double sw    = passBenchAt( size.width, size.height, passFrames, 0.0f, true, cores );
+		const double xt    = passBenchAt( size.width, size.height, passFrames, 1.0f, false, cores );
+		const double rest1 = passBenchAt( size.width, size.height, passFrames, 0.0f, false, 1 );
+		const double xt1   = passBenchAt( size.width, size.height, passFrames, 1.0f, false, 1 );
+		std::printf( "%s   %7.2f     %7.2f       %7.2f     |         %7.2f       %7.2f\n", size.name, rest, sw, xt, rest1, xt1 );
 	}
 	return 0;
 }
@@ -2181,6 +2686,8 @@ void usage()
 		"  --relock          the roll is the second-order step response\n"
 		"  --crosstalk       the leak doubles per octave below the corner\n"
 		"  --mutation        one character of the shipped GLSL fails --bounce\n"
+		"  --transition      the OpenFX build's curve reading, frame logic and C++ pass\n"
+		"                    against the plugin and the GPU, frame by frame\n"
 		"  --bench           time ProcessOpenGL at 720p through 4K\n"
 		"  --pipe            raw RGBA Dest (A) frames on stdin, raw RGBA frames on stdout\n"
 		"  --pipe-src PATH   raw RGBA Src (B) frames for --pipe (a file or FIFO); default: --input-b, held\n"
@@ -2283,7 +2790,7 @@ int main( int argc, char** argv )
 		}
 		else if( argument == "--names" || argument == "--mixer" || argument == "--ends" || argument == "--hysteresis"
 		         || argument == "--bounce" || argument == "--vi" || argument == "--relock" || argument == "--crosstalk"
-		         || argument == "--mutation" )
+		         || argument == "--mutation" || argument == "--transition" )
 			check = argument;
 		else
 		{
@@ -2339,6 +2846,8 @@ int main( int argc, char** argv )
 		result = runCrosstalk();
 	else if( check == "--mutation" )
 		result = runMutation();
+	else if( check == "--transition" )
+		result = runTransition();
 	else if( wantBench )
 		result = runBench( frames > 1 ? frames : 60, fps );
 	else if( wantPipe )

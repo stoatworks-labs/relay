@@ -27,6 +27,12 @@ void main()
 
 //---------------------------------------------------------------------------
 // The switching frame, the roll, and the crosstalk.
+//
+//= mirrored -- in source/Pass.cpp, for the OpenFX build's CPU render:
+// fetchA/fetchB, rolled, fetchSource, texelOf, leak and main, function for
+// function. Change one, change both, and run `rltest --transition`. The GLSL
+// itself carries no marker because demo/plugin.js must match it character
+// for character (demo/tools/check_shaders.py).
 //---------------------------------------------------------------------------
 const char* const kRelayShader = R"(#version 410 core
 

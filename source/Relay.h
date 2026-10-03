@@ -6,6 +6,7 @@
 //itself, so an include placed above it fails with "unknown type name" errors
 //that point at the About block rather than at the include order.
 #include "StoatworksAboutParams.h"
+#include "Frame.h"
 #include "Model.h"
 #include "Timing.h"
 
@@ -85,6 +86,8 @@ public:
 		double rollStart    = 0.0;
 		relay::model::CrossFilter cross;
 		int standard        = 0;
+		/// Exactly what the pass was handed: the uniforms are set from it.
+		relay::frame::Plan plan;
 	};
 	const State& StateForTest() const
 	{

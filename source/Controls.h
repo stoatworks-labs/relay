@@ -94,4 +94,37 @@ float ParamForLockTimeSeconds( double seconds );
 float ParamForDamping( double zeta );
 float ParamForCornerHz( double hz );
 
+/**
+    Every control in host units -- 0..1, an option's index, 0 or 1 for a
+    switch -- and, as constructed, every control's DEFAULT.
+
+    Both builds start from this one table: the FFGL constructor copies it
+    into its parameter array, and the OpenFX describe declares its defaults
+    from it. So the two inspectors cannot open on two different relays, and
+    the OpenFX render hands the shared code the same floats a Resolume slider
+    would have.
+*/
+struct HostValues
+{
+	float standard    = static_cast< float >( kPAL );
+	float switchPoint = static_cast< float >( kAnywhere );
+	/// The coil voltage. In Resolume the layer's opacity fader; in OpenFX the
+	/// host's Transition, so the OpenFX build declares no Opacity of its own.
+	/// 1 so a mixer dropped on a layer at full opacity shows this layer.
+	float opacity     = 1.0f;
+	float pullIn      = 0.7f;
+	float dropOut     = 0.3f;
+	float operate     = ParamForOperateSeconds( 0.008 );
+	float select      = 0.0f;
+	float bounceTime  = ParamForBounceSeconds( 0.001 );
+	float restitution = ParamForRestitution( 0.45 );
+	float openLevel   = 0.0f;
+	float genlocked   = 0.0f;
+	float phaseOffset = 0.25f;
+	float lockTime    = 0.5f;//0.316 s
+	float damping     = 0.5f;//zeta 0.447
+	float crosstalk   = 0.0f;
+	float corner      = ParamForCornerHz( 1.0e6 );
+};
+
 } // namespace relay

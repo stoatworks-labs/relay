@@ -24,15 +24,13 @@
     an absolute time.
 */
 
+#include "Frame.h"// kMaxCuts, which the GLSL writes out as Cuts[ 104 ]
+
 namespace relay
 {
 
 extern const char* const kVertexShader;
 extern const char* const kRelayShader;
-
-/// Most cuts the shader takes in one frame: two per bounce cycle, the
-/// break and the make, and room for a second schedule's tail.
-inline constexpr int kMaxCuts = 104;
 
 /// The negative controls' bitmask, shared with the CPU side. The shipped
 /// plugin always carries 0; only the harness sets any of these.
