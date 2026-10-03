@@ -32,7 +32,8 @@ and rolled, because the monitor has not pulled B's field phase in yet.*
 > It has **never been loaded into Resolume on macOS**.
 > On Windows, a build of v0.1.0 loads in Resolume Arena 7.27.1, is offered as a layer's Blend Mode and as a transition, is driven by the layer's opacity fader and by a layer transition, and hides only Standard, as designed — on software rendering, and no picture of it inside Resolume has been captured, so a correct render there is not yet shown.
 > The OpenFX transition agrees with the Resolume build to one 8-bit code in a test
-> host, but has **never been loaded into DaVinci Resolve** or any other real host.
+> host; an earlier version of it has run in DaVinci Resolve 21.1, and the current
+> defaults have not.
 > **Try it on a spare layer first**, and please report anything that misbehaves.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human
@@ -325,13 +326,19 @@ In DaVinci Resolve it should appear with the OpenFX video transitions, as
 between two clips. The outgoing clip
 is A, the incoming clip is B, and the transition's own progress (0 at its start,
 1 at its end) does what the layer's opacity fader does in Resolume: it is the
-coil voltage. With the defaults the relay pulls in when the transition is 70%
-of the way through, so the cut, the bounce and the start of the roll land there.
+coil voltage. With the defaults the relay pulls in half way through — at the
+edit point of a centred transition — so the cut, the bounce and the start of
+the roll land there, and over the last 15% of the transition the picture fades
+to exactly the incoming clip, so the transition ends on it cleanly.
 
 The controls are Resolume's, with these differences:
 
 - **No Opacity.** The transition's progress is the coil.
-- **Pull-in** is how far through the transition the cut happens. **Drop-out**
+- **Pull-in** is how far through the transition the cut happens: **0.5** by
+  default here, where Resolume's default is 0.7. 0.7 is a sensible fader
+  position, but on a timeline it left the roll running at the end of the
+  transition and the picture jumped to the clean clip on the next frame.
+  **Drop-out**
   matters only if the progress comes back down (a reversed or keyframed
   transition); then the relay cuts back to the outgoing clip where the progress
   falls to Drop-out. A reversed transition starts on the incoming clip.
@@ -339,10 +346,14 @@ The controls are Resolume's, with these differences:
   relay rests on the outgoing clip) or **To, then From**.
 - **Standard, Switch Point, Select and Genlocked** cannot be keyframed. Everything
   else can.
-- **The end of the transition ends the effect.** The picture rolls for about
-  two thirds of a second after the cut at the defaults; once the transition is
-  over the host shows the incoming clip itself. For the whole re-lock, make the
-  transition longer or Pull-in lower.
+- **Ends** is the transition's own. The picture rolls for about two thirds of a
+  second after the cut at the defaults, longer than half a one-second
+  transition, and once the transition is over the host shows the incoming clip
+  itself. With Ends on **Fade** (the default) the last **End Length** of the
+  transition — 0.15, up to 0.5 — fades from the relay to exactly the incoming
+  clip, and the last frame is that clip. **Cut** keeps the relay to the last
+  frame, roll and all; make the transition longer or Pull-in lower to see the
+  whole re-lock that way.
 
 Every frame is worked out from the transition's progress up to that frame, so
 scrubbing, rendering out of order and re-rendering all give the same picture.
@@ -351,8 +362,10 @@ had reached — one frame sooner than Resolume, which reads its fader at the
 start of each frame, can show it.
 
 It runs on the CPU: about 3 ms a frame at 1920×1080 (10 ms with Crosstalk at 1)
-on an Apple M4 Max in a test host. It has **not yet been loaded into Resolve or
-Vegas**; please report what you see.
+on an Apple M4 Max in a test host. An earlier version, with Pull-in at 0.7 and
+no Ends, has run in DaVinci Resolve 21.1 on the Edit page; this one has not been
+in Resolve or Vegas yet, so please report what you see. A host that reports no
+frame rate is taken as 24 fps.
 
 ---
 
@@ -378,11 +391,11 @@ Vegas**; please report what you see.
   a transparent one cuts the transparency too, as a router would. The open contact
   is opaque.
 - **No presets.**
-- **The OpenFX transition has never been in a real host.** It was checked
-  against the Resolume build frame by frame offline and in a test host, not in
-  Resolve or Vegas. It relies on the host reporting the transition's progress
-  at times other than the frame being drawn; a host that did not would give a
-  plain cut at Pull-in.
+- **The OpenFX transition is barely tried in real hosts.** An earlier version
+  ran in DaVinci Resolve 21.1; the current one, with Pull-in 0.5 and Ends, has
+  not, and nothing has been tried in Vegas. It relies on the host reporting the
+  transition's progress at times other than the frame being drawn, which
+  Resolve does; a host that did not would give a plain cut at Pull-in.
 - **There is a browser demo** at [relay-demo.stoatworks-labs.com](https://relay-demo.stoatworks-labs.com).
   It is a port to a web page, not the plugin: the shaders run in WebGL2 and the
   relay's CPU half is rewritten in JavaScript. The page lists what it does not

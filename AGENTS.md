@@ -9,8 +9,9 @@ universal macOS `.bundle` and a Windows `.dll`. MIT. Intended home
 into Resolume on macOS; probed by hand in Arena 7.27.1 on Windows the same day
 (see "What Relay showed in Arena"). The fleet's third mixer, after genlock
 and wipe. It also builds as an **OpenFX transition** for Resolve and Vegas
-(`source/ofx/RelayOFX.cpp`, CPU render): see "The OpenFX build" below. Never
-loaded into a real OpenFX host.
+(`source/ofx/RelayOFX.cpp`, CPU render): see "The OpenFX build" below. Its
+first build ran in DaVinci Resolve 21.1 on the Edit page (2026-10-03); the
+current defaults (Pull-in 0.5, Ends) have not been in a real host.
 
 `CLAUDE.md` is the command reference. This file is the *why*: the idea, every
 number in the harness and where it comes from, the traps this build actually
@@ -79,6 +80,7 @@ framebuffer**.
 | `--mutation` | **fails** | One character of the shipped GLSL — `/ OutSize.y` → `/ OutSize.x` in the line mapping — fails 3 `--bounce` assertions; the shipped text through the same hook passes and renders the default path's bytes. |
 | `--transition` curve | **1e-9 of a frame** | `transition::CoilHistory` against closed forms: a 0→1 ramp over 50 frames pulls in at 36.25 (Pull-in 0.725 × 50); up to 1 at 30 and back to 0 at 60 pulls in at 21.75 and drops at Drop-out's 51.75; reversed 1→0 starts energised and drops at 36.25; flat 0.5 never switches; a step at frame 7 switches at 7 **exactly**; NaN outside the transition (a refusing host) with the read-back starting a duration early changes nothing. The bound is the bisection's: 32 halvings of a one-frame bracket, 2.3e-10. Negative control: Drop-out at Pull-in drops at 38.25. |
 | `--transition` in-scan | **the line** | A ramp crossing Pull-in 0.3 frames (5 ms at 60 fps) after frame 10 starts, Operate 0: frame 10's first cut is on PAL line floor( 5 ms / 64 µs ) = 78, and frame 9 has none. The FFGL plugin cannot show this (it reads its fader at frame starts); see "The OpenFX build". |
+| `--transition` end | **exact** at the ends of the ramp, 1e-6 at its middle | `transition::RelayStrength` against its definition: 1 under Cut at any progress; under Fade 1 up to 1 - End Length (0.85), exactly 0 from 1, 0.5 at 0.925, monotone, slope zero at both ends of the ramp (a 1e-4 step moves it 1.3e-6 = 3 ( 1e-4 / 0.15 )^2), End Length 0 a cut at 1, End Length clamped to 0.5, NaN shows the relay. A k/24 transition's last frame (23/24) judged a frame on is exactly SourceTo; judged at its own progress it would keep 0.19 of the relay (the negative control). `FadeToRows` at 0 copies SourceTo exactly. |
 | `--transition` plan | **exact**, every field | `transition::PlanFromCurve` on the cue sheet as a step curve against the plan the FFGL plugin handed its shader (`StateForTest().plan`), compared with `!=` on doubles: starting contact, every cut's line, xfrac and state, open level, rolled source, roll, tear, crosstalk gain / decay / taps / norm. 50 frames × 2 rasters over five scenarios (below). Both sides are the same double arithmetic on the same floats, so there is no tolerance to derive. The first run differed by 3e-7 in one xfrac -- the harness's step curve had a 1e-9 epsilon in its floor, which moved the step 1e-9 frames early; a step must be AT its frame. Negative control: the curve a frame late is not the plan (10 cuts vs 0). |
 | `--transition` pixels | **one 8-bit code** away from a cut; within one pixel of a cut on its line, counted | `pass::Render` on the plan against the GPU's RGBA8 frame. Away from a cut both passes fetch the same texels with the same weights in float; the GPU's bilinear weights are fixed-point and its float sums may fuse, which moves a channel by under one code before rounding. Measured: worst 1/255, 75,891 of 14.4 M pixels differ (8,848 on the software renderer), none by more than one code, none at a cut. Negative control: twice the bounce, 7,765 pixels off by more than one code away from any cut. |
 | `--bench` | not asserted | No threshold is worth asserting on somebody else's GPU. The C++ pass is timed beside it, on every core and on one. |
@@ -493,6 +495,36 @@ shows that on frame-step curves the result is the FFGL plugin's plan exactly.
   are the FFGL build's.
 - **No Fault uniform.** The negative controls are GPU-side, to show the GPU
   checks can fail; the C++ pass does not mirror them.
+- **Pull-in defaults to 0.5 here, 0.7 in FFGL** (`transition::kPullInDefault`;
+  every other default is `HostValues`'). In Resolume Pull-in is a fader
+  position. On a timeline it is where in the transition the cut lands, and at
+  0.7 a one-second transition in Resolve 21.1 was still rolling on its last
+  frame (6.4% of the picture not yet SourceTo) and popped on the next. 0.5 is
+  the edit point of a centred transition, with half of it left to settle. The
+  lead's call, 2026-10-03.
+- **Ends: Fade (default) or Cut, End Length 0..0.5, default 0.15** -- the names,
+  options and defaults of lenticular's and pilot's transitions, both static.
+  Half a transition is still not enough (see the settling table below), so
+  under Fade the last End Length crossfades the relay's picture to exactly
+  SourceTo with a smoothstep in premultiplied colour; Cut is the first OpenFX
+  build bit for bit. **Only the end** -- the start is the relay at rest on
+  SourceFrom already, and fading it too would fade a low Pull-in's switch.
+  The fade goes to SourceTo even under Select "To, then From", because
+  SourceTo is what the host shows next.
+- **The end is judged one frame on** (`transition::EndProgress`): the progress
+  plus its rise over the last frame, while it is rising. Resolve's 24-frame
+  transition switched on frame 17 at Pull-in 0.7, which fits a progress of k/24
+  or (k + 0.5)/24 and not k/23 -- its last frame never reaches 1, and judged at
+  its own progress the fade would leave up to 0.19 of the relay there and pop on
+  the next frame. Judged a frame on, the last frame is SourceTo bitwise whether
+  the host's progress reaches 1 on it or after it. Where lenticular and pilot
+  judge at the frame's own progress, this differs by that one frame.
+- **The frame rate falls back to 24**, read from the output clip, each input,
+  then the effect, each in its own try (FUSION-FIX, 2026-10-03: Resolve's
+  Fusion page reports no frame rate anywhere, and an unguarded read escapes
+  render as kOfxStatErrMissingHostFeature). The premultiplication reads are
+  guarded the same way, and a frame range of [0, 0] counts as unknown. Fusion
+  cannot host a transition, so for Relay this is defence, not a feature.
 
 **Verified (2026-10-03, M4 Max):** `rltest --transition` as tabled above, on
 the GPU and on Apple's software renderer. The bundle itself in a CPU OpenFX
@@ -511,16 +543,50 @@ frames opens the contact at frames 17 and 41 and not 31, and with Drop-out 0.7 a
 after their predecessors in one instance, and out of order hash the same.
 8-bit and float renders agree bitwise. 1920×1080 in that host, 8 threads,
 marshalling included: 3.3 ms at rest, switching or rolling; 9.8 ms with
-Crosstalk 1.
+Crosstalk 1. Those were measured at Pull-in 0.7 and no Ends, and re-run
+unchanged with the two pinned (`ends` Cut, `pullIn` 0.7) once both existed.
 
-**Not verified:** any real host. Never loaded into Resolve, Vegas, Nuke or
-Natron; whether Resolve answers `Transition` at times other than the frame
-being rendered -- the reformulation depends on it -- is the API's promise, not
-an observation (a host that answered with the current value everywhere would
-give a plain cut at Pull-in). What Resolve reports as the effect's duration
-and time origin for a transition is assumed, as above. The Windows and Linux
-builds have only compiled (and, on Linux, `dlopen`ed on Rocky 8 in CI); 16-bit
-and RGB-only clips have not been rendered by any host.
+**Settling, at the defaults** (Pull-in 0.5; a one-second transition, progress
+k/N; 1080p; `PlanFromCurve` frame by frame, 2026-10-04). The bounce is over
+about 2 ms after the break, inside the switching frame. The roll is what lasts:
+
+| fps | switch frame | roll on the last frame | under half a row from | exactly zero from |
+| --- | --- | --- | --- | --- |
+| 24 | 12 | 1.8 rows, tear 0.8 px | 0.667 s after the crossing | 1.750 s |
+| 25 | 13 | 1.6 rows, tear 0.7 px | 0.660 s | 1.780 s |
+| 30 | 15 | 0.9 rows, tear 0.4 px | 0.633 s | 1.767 s |
+
+At Pull-in 0.7 the last frame is rolling by 22, 21 and 17 rows. Half a
+one-second transition does not hold the re-lock at any of these rates, hence
+Ends. In the test host at 1080p with the cards: the frame before the switch is
+SourceFrom bitwise; the last frame is SourceTo bitwise under Fade and not under
+Cut (1.3%, 1.3%, 0.7% of pixels still rolling at Pull-in 0.5; 14.0%, 13.4%,
+11.0% at 0.7 -- the lead's stills in Resolve gave 6.4% at 0.7 and 24 fps);
+the frame before the last is mid-fade (4.9%, 4.3%, 3.1%, worst 40 codes).
+
+**In a real host: DaVinci Resolve 21.1, Edit page, 2026-10-03** (the lead,
+with the first build: Pull-in 0.7, no Ends). A 24-frame centred transition
+between two stills at 24 fps: frames exactly SourceFrom until the switch on
+frame 17 of 24; the bounce and the roll then played -- so Resolve answers
+`Transition` at other times and the crossing search works, and the read-back
+from the effect's duration reaches far enough; frames after the transition
+exactly SourceTo; the roll still running on the last frame (6.4% of pixels
+not yet SourceTo), then a pop. That pop is why Pull-in and Ends changed.
+
+**No frame rate (`--quirks fusion`, 2026-10-04).** The test host's Fusion
+mode -- no FrameRate on the effect or any clip, frame ranges [0, 0], the
+Unmapped pair and the render-status props absent -- renders this build at
+frames 12, 13, 17 and 23 of a 24-frame ramp byte-identical to the normal host
+at 24 fps, and frames 13 and 17 differ at 25 fps, so the fallback is what was
+used. The previous head (eb863fc) did NOT fail under the quirk either: its
+frame-rate read was already guarded, falling back to 25, and its quirks
+frames equal its own 25 fps frames. `verify.sh` runs the check when `OFXHOST`
+names the extended host.
+
+**Not verified:** the current build in any real host -- Pull-in 0.5 and Ends
+have not been in Resolve. Never loaded into Vegas, Nuke or Natron. The Windows
+and Linux builds have only compiled (and, on Linux, `dlopen`ed on Rocky 8 in
+CI); 16-bit and RGB-only clips have not been rendered by any host.
 
 ---
 
