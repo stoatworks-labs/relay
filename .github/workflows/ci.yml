@@ -3,8 +3,10 @@ name: ci
 # Both platforms on every push and pull request, so a Dependabot bump has a
 # status check to gate on and a GLEW-shaped break -- which macOS is
 # structurally blind to, because macOS never links GLEW -- is caught before a
-# tag. There is no Linux job: the CMakeLists branches on APPLE and WIN32, and
-# Resolume has no Linux build.
+# tag. Both build the FFGL mixer AND the OpenFX transition (BUILD_OFX is on by
+# default). There is no Linux job here: Resolume has no Linux build, and the
+# OpenFX plugin's Linux build and Rocky 8 load test are release.yml's
+# linux-ofx and linux-load, which a workflow_dispatch runs without publishing.
 on:
   push:
     branches: [main]
@@ -39,6 +41,22 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release --parallel
+
+      - name: The OpenFX bundle
+        # What the release job asserts, before a tag: the entry point, the
+        # plist naming the binary that is on disk, and an ad-hoc sign that
+        # reads that plist. The pictures are --transition's, in the suites.
+        run: |
+          ofx=build/Relay.ofx.bundle
+          symbols=$( nm -gU "$ofx/Contents/MacOS/Relay.ofx" )
+          case "$symbols" in
+            *_OfxGetPlugin*) echo "exports OfxGetPlugin" ;;
+            *) echo "no OfxGetPlugin"; exit 1 ;;
+          esac
+          exe=$( /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$ofx/Contents/Info.plist" )
+          test -f "$ofx/Contents/MacOS/$exe"
+          cp -R "$ofx" "$RUNNER_TEMP/"
+          codesign --force --sign - --timestamp=none "$RUNNER_TEMP/Relay.ofx.bundle"
 
       - name: The suites
         # The runner has no GPU, so everything but --names runs on Apple's
@@ -90,8 +108,14 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
+      - name: The OpenFX bundle
+        shell: bash
+        run: test -f build/Relay.ofx.bundle/Contents/Win64/Relay.ofx
+
       - uses: actions/upload-artifact@v7
         with:
           name: relay-windows-x86_64
-          path: build/Release/*.dll
+          path: |
+            build/Release/*.dll
+            build/Relay.ofx.bundle/Contents/Win64/Relay.ofx
           if-no-files-found: error

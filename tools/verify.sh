@@ -16,7 +16,10 @@
 #                 (alpha included), the coil's hysteresis, the switching
 #                 frame's bands against the bounce schedule, the vertical
 #                 interval, the second-order re-lock, the crosstalk's
-#                 6 dB an octave, and one character of GLSL mutated
+#                 6 dB an octave, one character of GLSL mutated -- and the
+#                 OpenFX build's halves against this build: its reading of a
+#                 Transition curve against closed forms, its frame plan
+#                 against the plugin's own, its C++ pass against the GPU
 #   software      the same suites on Apple's software renderer, which is
 #                 what a GPU-less CI runner gets: a check calibrated on this
 #                 Mac's GPU fails here before it fails in CI
@@ -42,6 +45,10 @@
 #                 would be handed one input and return FF_FAIL for ever.
 #                 The input count is a separate declaration and is asserted
 #                 separately; so is parameter 0, which Arena hides.
+#   openfx        the OpenFX transition bundle as a host and a release see
+#                 it: universal, OfxGetPlugin exported, the plist naming the
+#                 binary on disk, an ad-hoc sign, and ofxprobe loading it and
+#                 reading back its identifier, label, group and context
 #   bench         the render cost, for the record. Not pass/fail -- there is
 #                 no threshold worth asserting on somebody else's GPU -- but
 #                 a verify run leaves a timing on the record, which is what
@@ -189,7 +196,7 @@ else
 fi
 
 RLTEST="$BUILD/rltest"
-SUITES="names mixer ends hysteresis bounce vi relock crosstalk mutation"
+SUITES="names mixer ends hysteresis bounce vi relock crosstalk mutation transition"
 
 step "suites"
 for t in $SUITES; do
@@ -351,8 +358,90 @@ if [ "$(uname)" = "Darwin" ] && [ -d "$BUNDLE" ]; then
 	fi
 fi
 
+#---------------------------------------------------------------------------
+# The OpenFX build: a Transition, for Resolve and the other OFX hosts.
+#
+# The plist and the codesign are here for the same reason as the FFGL
+# bundle's: cmake/InfoOFX.plist.in is copied from repo to repo, and a
+# CFBundleExecutable that names the previous plugin's binary passes the
+# build, lipo, nm and a probe, and fails only in the release job's codesign.
+#
+# ofxprobe instantiates the Filter context only, and this plugin is a
+# Transition, so it can load and describe the bundle but not render it. The
+# render is skipped, and said so; the pictures are rltest --transition's.
+#---------------------------------------------------------------------------
+OFX_BUNDLE="$BUILD/Relay.ofx.bundle"
+OFX_BIN="$OFX_BUNDLE/Contents/MacOS/Relay.ofx"
+if [ "$(uname)" = "Darwin" ]; then
+	step "openfx"
+	if [ ! -f "$OFX_BIN" ]; then
+		fail "no OpenFX bundle at $OFX_BUNDLE (configured with -DBUILD_OFX=OFF?)"
+	else
+		archs=$(lipo -archs "$OFX_BIN" 2>/dev/null)
+		if [[ "$archs" == *arm64* && "$archs" == *x86_64* ]]; then
+			pass "Relay.ofx is universal ($archs)"
+		else
+			fail "Relay.ofx is not universal: got '$archs'"
+		fi
+
+		syms=$(nm -gU "$OFX_BIN" 2>/dev/null)
+		case "$syms" in
+			*_OfxGetPlugin*) pass "exports OfxGetPlugin" ;;
+			*) fail "no OfxGetPlugin -- no host will load it" ;;
+		esac
+
+		exe=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$OFX_BUNDLE/Contents/Info.plist" 2>/dev/null)
+		if [ -n "$exe" ] && [ -f "$OFX_BUNDLE/Contents/MacOS/$exe" ]; then
+			pass "CFBundleExecutable ($exe) is on disk"
+		else
+			fail "CFBundleExecutable is '$exe' but no such binary exists -- codesign will fail after the tag"
+		fi
+		ident=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$OFX_BUNDLE/Contents/Info.plist" 2>/dev/null)
+		if [ "$ident" = "com.stoatworks.relay.ofx" ]; then
+			pass "CFBundleIdentifier is $ident"
+		else
+			fail "CFBundleIdentifier is '$ident'"
+		fi
+
+		tmp=$(mktemp -d)
+		cp -R "$OFX_BUNDLE" "$tmp/" 2>/dev/null
+		if codesign --force --sign - --timestamp=none "$tmp/Relay.ofx.bundle" >/dev/null 2>&1; then
+			pass "ad-hoc signs (the command the release job runs)"
+		else
+			fail "the OpenFX bundle will not codesign"
+		fi
+		rm -rf "$tmp"
+
+		OFXPROBE="${OFXPROBE:-../resolume-ofx-bridge/build/ofxprobe}"
+		[ -x "$OFXPROBE" ] || OFXPROBE="$HOME/Projects/resolume/resolume-ofx-bridge/build/ofxprobe"
+		if [ -x "$OFXPROBE" ]; then
+			# --dir ADDS a search path, and the first identifier match wins:
+			# a stale copy in /Library/OFX/Plugins would be read instead, so
+			# the bundle path is part of the match.
+			out=$("$OFXPROBE" --dir "$BUILD" 2>&1)
+			case "$out" in
+				*"com.stoatworks.relay"*"label      : Relay"*"grouping   : Stoatworks"*"bundle     : $BUILD/Relay.ofx.bundle"*)
+					pass "ofxprobe loads it: com.stoatworks.relay, Relay, in Stoatworks" ;;
+				*) fail "ofxprobe does not read the identity back -- run: $OFXPROBE --dir $BUILD" ;;
+			esac
+			case "$out" in
+				*"contexts   : OfxImageEffectContextTransition "*) pass "a Transition, and only that" ;;
+				*) fail "the contexts are not Transition alone" ;;
+			esac
+			render=$("$OFXPROBE" --dir "$BUILD" --render com.stoatworks.relay --size 320x180 --out "$(mktemp -d)/ofx.bmp" 2>&1)
+			case "$render" in
+				*"Filter context"*) printf '   skipped: this ofxprobe hosts the Filter context only -- rltest --transition is the render check\n' ;;
+				*rendered*) pass "ofxprobe renders it" ;;
+				*) fail "ofxprobe could not render it"; printf '%s\n' "$render" | sed 's/^/      /' ;;
+			esac
+		else
+			printf '   skipped: ofxprobe not built at %s\n' "$OFXPROBE"
+		fi
+	fi
+fi
+
 step "bench"
-"$RLTEST" --bench --frames 60 2>&1 | sed -n '3,8p' | sed 's/^/   /'
+"$RLTEST" --bench --frames 60 2>&1 | sed -n '3,7p;9p;11,15p' | sed 's/^/   /'
 
 printf '\n'
 if [ "$failures" -eq 0 ]; then
