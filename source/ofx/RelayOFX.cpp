@@ -339,6 +339,24 @@ public:
 		endLength   = fetchDoubleParam( kParamEndLength );
 	}
 
+	/// The relay works in seconds: the coil's bounces depend on when the
+	/// Transition crossed, not only on its value now. Unless a plugin says so, a
+	/// host may treat its output as fixed while its inputs and parameters are,
+	/// and Resolve's Fusion page does: it rendered every fleet generator once and
+	/// repeated that frame. A preference, not a requirement: a host that does not
+	/// know the property is left to its own default rather than failing the
+	/// effect.
+	void getClipPreferences( OFX::ClipPreferencesSetter& preferences ) override
+	{
+		try
+		{
+			preferences.setOutputFrameVarying( true );
+		}
+		catch( ... )
+		{
+		}
+	}
+
 	void render( const OFX::RenderArguments& args ) override
 	{
 		std::unique_ptr< OFX::Image > dst( dstClip->fetchImage( args.time ) );

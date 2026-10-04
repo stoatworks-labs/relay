@@ -598,6 +598,24 @@ Nuke or Natron. The Windows and Linux builds have only compiled (and, on
 Linux, `dlopen`ed on Rocky 8 in CI); 16-bit and RGB-only clips have not been
 rendered by any host.
 
+### Declare the output frame-varying, or Fusion repeats a generator's first frame
+
+`getClipPreferences` calls `setOutputFrameVarying( true )`. The relay works in
+seconds: the coil's bounces depend on when the Transition crossed, not only on its
+value now. Without that declaration a host may treat the output as fixed while the
+inputs and parameters hold still. Measured 2026-10-04 in Resolve Studio 21.1's
+Fusion page: every fleet generator rendered frames 20-22 byte-identical, none having
+declared it, and with the declaration they animate.
+
+A tool fed by a MediaIn is re-rendered every frame either way, so in Fusion this
+changes nothing visible. Separately, and with or without the flag, Relay held at a
+mid Transition in Fusion shows plain SourceTo where `ofxprobe` shows the coil moving
+-- an open question about how Fusion answers the Transition curve at other times,
+not a caching one.
+
+The flag changes no pixels: `ofxprobe` renders byte-identical with and without it,
+on a moving sequence, on a still and under `--quirks fusion`.
+
 ---
 
 ## The browser demo
