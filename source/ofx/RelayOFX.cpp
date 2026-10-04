@@ -57,8 +57,9 @@
 ///
 /// **Frame rate.** OFX time is in frames and the relay works in seconds. The
 /// rate is read from the output clip, the inputs, then the effect, each in its
-/// own try; a host that reports none -- Resolve's Fusion page reports none at
-/// all -- is taken as 24 fps. No host property read here may escape render.
+/// own try -- Resolve's Fusion page reports it on the effect but not on its
+/// clips -- and a host that reports none is taken as 24 fps. No host property
+/// read here may escape render.
 ///
 /// ------------------------------------------------------------- and tiles
 ///
@@ -137,7 +138,8 @@ constexpr const char* kParamEnds        = "ends";     ///< lenticular's and pilo
 constexpr const char* kParamEndLength   = "endLength";///< lenticular's and pilot's name
 
 /// The frame rate assumed when the host reports none anywhere: Resolve's
-/// default timeline rate. Resolve's Fusion page reports none at all.
+/// default timeline rate. Resolve's Fusion page reports one on the effect,
+/// though not on its clips.
 constexpr double kFallbackFrameRate = 24.0;
 
 using namespace relay;
@@ -461,9 +463,9 @@ private:
 
 	/// Frames per second of the timeline: OFX time is in frames, the relay
 	/// works in seconds. The output clip, then each input, then the effect,
-	/// each read on its own: a host is entitled to report none of them --
-	/// Resolve's Fusion page does not -- and a missing property must not
-	/// escape render.
+	/// each read on its own: a host is entitled to leave any of them out --
+	/// Resolve's Fusion page reports only the effect's -- and a missing
+	/// property must not escape render.
 	double frameRate() const
 	{
 		const auto usable = []( double fps ) { return std::isfinite( fps ) && fps > 0.0; };

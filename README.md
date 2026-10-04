@@ -230,8 +230,12 @@ build's GPU render of the same cards to **one 8-bit code** (see
   first OpenFX build, bit for bit. The same names, options and defaults as
   the lenticular and pilot transitions; only the end is faded, because the
   start is the relay at rest on SourceFrom already.
-- **A host that reports no frame rate** is taken as 24 fps. (Resolve's Fusion
-  page reports none, but cannot host a transition anyway.)
+- **A host that reports no frame rate** is taken as 24 fps. Resolve's Fusion
+  page reports the frame rate on the effect but not on its clips, and Relay
+  reads the effect's. Fusion has no transition slot, but Relay does load as a
+  Fusion tool, with Transition as an ordinary control that has to be
+  animated. Keyed 0→0.6 and then held, it showed plain SourceTo there where
+  the test host shows the coil moving — not yet understood.
 
 ## Build
 
@@ -323,7 +327,7 @@ renderer:
 | OpenFX: the end | one-second transitions (progress k/N over N frames) at 1080p, 24, 25 and 30 fps: the frame before the switch is SourceFrom bitwise; at the defaults (Pull-in 0.5, Ends Fade) the **last frame is SourceTo bitwise**; under Cut it is not (1.3%, 1.3% and 0.7% of pixels still rolling; 14.0%, 13.4% and 11.0% at the old Pull-in 0.7), and the frame before the last under Fade is mid-fade (4.9%, 4.3%, 3.1% of pixels, worst 40 codes). `rltest --transition` checks the fade's shape: the relay alone to progress 0.85, half at 0.925, exactly SourceTo from 1, flat at both ends, End Length clamped, and a k/24 transition's last frame (23/24) exactly SourceTo because the end is judged a frame on (judged at its own progress it would keep 0.19 of the relay: the negative control) |
 | OpenFX: settling | at the defaults the bounce is over 2 ms after the break; the roll is under half a row at 1080p from **0.667 s** after the switch at 24 fps, **0.660 s** at 25, **0.633 s** at 30, and exactly zero from 1.750, 1.780 and 1.767 s — longer than half a one-second transition at every rate, which is why Ends exists |
 | OpenFX binary | universal, exports `OfxGetPlugin`, the plist names the binary, ad-hoc signs; `ofxprobe` reads `com.stoatworks.relay` / Relay / Stoatworks, Transition context only |
-| OpenFX with no frame rate | the test host's `--quirks fusion` (no frame rate on the effect or any clip, frame ranges [0, 0], as Resolve's Fusion page): the plugin renders, and its frames are **byte-identical** to the normal host's at 24 fps — the fallback — and differ from 25 fps'. `tools/verify.sh` checks it when `OFXHOST` names that host |
+| OpenFX with no frame rate | the test host's `--quirks fusion` (no frame rate on the effect or any clip, frame ranges [0, 0]; stricter than Resolve's Fusion page, which reports the effect's rate): the plugin renders, and its frames are **byte-identical** to the normal host's at 24 fps — the fallback — and differ from 25 fps'. `tools/verify.sh` checks it when `OFXHOST` names that host |
 | OpenFX render cost | 1920×1080 in the test host (its thread suite gives 8 threads; marshalling and the curve reading included): **3.3 ms/frame** at rest, switching or rolling, **9.8 ms** with Crosstalk 1. The C++ pass alone (`rltest --bench`, 16 threads): 1.0 ms at rest, 7.5 ms with Crosstalk 1; on one thread 7.4 and 58.6 ms |
 
 Run `tools/verify.sh` before believing any of it.

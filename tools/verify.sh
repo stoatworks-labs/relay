@@ -469,8 +469,8 @@ fi
 # A one-second transition at 24 fps, defaults: the frame before the switch is
 # SourceFrom byte for byte, the last frame is SourceTo byte for byte under
 # Ends Fade and is not under Cut, and under --quirks fusion (no frame rate
-# anywhere, as Resolve's Fusion page) the switching frames are the 24 fps
-# fallback's, byte for byte.
+# anywhere; stricter than Resolve's Fusion page, which reports the effect's)
+# the switching frames are the 24 fps fallback's, byte for byte.
 #---------------------------------------------------------------------------
 if [ -n "${OFXHOST:-}" ] && [ -x "$OFXHOST" ] && [ -d "$OFX_BUNDLE" ]; then
 	step "openfx transition, rendered (OFXHOST)"

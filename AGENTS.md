@@ -523,10 +523,12 @@ shows that on frame-step curves the result is the FFGL plugin's plan exactly.
   judge at the frame's own progress, this differs by that one frame.
 - **The frame rate falls back to 24**, read from the output clip, each input,
   then the effect, each in its own try (FUSION-FIX, 2026-10-03: Resolve's
-  Fusion page reports no frame rate anywhere, and an unguarded read escapes
-  render as kOfxStatErrMissingHostFeature). The premultiplication reads are
-  guarded the same way, and a frame range of [0, 0] counts as unknown. Fusion
-  cannot host a transition, so for Relay this is defence, not a feature.
+  Fusion page reports the frame rate on the effect but on no clip, and an
+  unguarded clip read escapes render as kOfxStatErrMissingHostFeature; in
+  Fusion the effect's rate, the timeline's, is what is read). The
+  premultiplication reads are guarded the same way, and a frame range of
+  [0, 0] counts as unknown. Fusion cannot host a transition, so for Relay this
+  is defence, not a feature.
 
 **Verified (2026-10-03, M4 Max):** `rltest --transition` as tabled above, on
 the GPU and on Apple's software renderer. The bundle itself in a CPU OpenFX
@@ -584,14 +586,14 @@ SourceTo, so no pop. That last frame is the case `EndProgress` exists for
 (Resolve's last frame does not reach progress 1), and it held in the host.
 
 **No frame rate (`--quirks fusion`, 2026-10-04).** The test host's Fusion
-mode -- no FrameRate on the effect or any clip, frame ranges [0, 0], the
-Unmapped pair and the render-status props absent -- renders this build at
-frames 12, 13, 17 and 23 of a 24-frame ramp byte-identical to the normal host
-at 24 fps, and frames 13 and 17 differ at 25 fps, so the fallback is what was
-used. The previous head (eb863fc) did NOT fail under the quirk either: its
-frame-rate read was already guarded, falling back to 25, and its quirks
-frames equal its own 25 fps frames. `verify.sh` runs the check when `OFXHOST`
-names the extended host.
+mode is stricter than Fusion, which reports the effect's rate -- no FrameRate
+on the effect or any clip, frame ranges [0, 0], the Unmapped pair and the
+render-status props absent. It renders this build at frames 12, 13, 17 and 23
+of a 24-frame ramp byte-identical to the normal host at 24 fps, and frames 13
+and 17 differ at 25 fps, so the fallback is what was used. The previous head
+(eb863fc) did NOT fail under the quirk either: its frame-rate read was already
+guarded, falling back to 25, and its quirks frames equal its own 25 fps
+frames. `verify.sh` runs the check when `OFXHOST` names the extended host.
 
 **Not verified:** any real host but Resolve on macOS. Never loaded into Vegas,
 Nuke or Natron. The Windows and Linux builds have only compiled (and, on
