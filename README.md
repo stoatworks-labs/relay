@@ -50,15 +50,16 @@ and the two held frames are stills of frames the plugin rendered.*
 
 ## Download
 
-**[v0.1.0](https://github.com/stoatworks-labs/relay/releases/tag/v0.1.0)** — prebuilt for macOS and Windows. Pick your platform:
+**[v0.2.0](https://github.com/stoatworks-labs/relay/releases/tag/v0.2.0)** — prebuilt for macOS, Windows and Linux. Pick your platform:
 
 <details>
 <summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .dmg disk image | [`relay-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/relay/releases/download/v0.1.0/relay-0.1.0-macos-universal.dmg) | 208 KB |
-| Universal (Apple Silicon + Intel) · .zip archive | [`relay-macos-universal.zip`](https://github.com/stoatworks-labs/relay/releases/latest/download/relay-macos-universal.zip) | 170 KB |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`relay-0.2.0-macos-universal.dmg`](https://github.com/stoatworks-labs/relay/releases/download/v0.2.0/relay-0.2.0-macos-universal.dmg) | 230 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`relay-macos-universal.zip`](https://github.com/stoatworks-labs/relay/releases/latest/download/relay-macos-universal.zip) | 185 KB |
+| Universal (Apple Silicon + Intel) · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`relay-ofx-macos-universal.zip`](https://github.com/stoatworks-labs/relay/releases/latest/download/relay-ofx-macos-universal.zip) | 261 KB |
 
 </details>
 
@@ -67,8 +68,18 @@ and the two held frames are stills of frames the plugin rendered.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| x64 · .exe installer | [`relay-0.1.0-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/relay/releases/download/v0.1.0/relay-0.1.0-windows-x86_64-setup.exe) | 219 KB |
-| x64 · .zip archive | [`relay-windows-x86_64.zip`](https://github.com/stoatworks-labs/relay/releases/latest/download/relay-windows-x86_64.zip) | 110 KB |
+| x64 · .exe installer | [`relay-0.2.0-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/relay/releases/download/v0.2.0/relay-0.2.0-windows-x86_64-setup.exe) | 224 KB |
+| x64 · .zip archive | [`relay-windows-x86_64.zip`](https://github.com/stoatworks-labs/relay/releases/latest/download/relay-windows-x86_64.zip) | 111 KB |
+| x64 · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`relay-ofx-windows-x86_64.zip`](https://github.com/stoatworks-labs/relay/releases/latest/download/relay-ofx-windows-x86_64.zip) | 76 KB |
+
+</details>
+
+<details>
+<summary><b>Linux</b> — x64</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| x64 · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`relay-ofx-linux-x86_64.zip`](https://github.com/stoatworks-labs/relay/releases/latest/download/relay-ofx-linux-x86_64.zip) | 713 KB |
 
 </details>
 
