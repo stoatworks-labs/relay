@@ -66,6 +66,22 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
+# resolume-ofx-bridge, for ofxprobe. It sits beside this repo's checkout --
+# and from a git worktree `..` is the worktrees folder, not Projects/resolume,
+# so the main checkout is found through git's common dir as well.
+# RELAY_BRIDGE overrides both, and OFXPROBE the probe itself.
+BRIDGE="${RELAY_BRIDGE:-}"
+if [ -z "$BRIDGE" ]; then
+	for candidate in "../resolume-ofx-bridge" \
+	                 "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")/../resolume-ofx-bridge"; do
+		if [ -d "$candidate/build" ]; then
+			BRIDGE="$candidate"
+			break
+		fi
+	done
+fi
+BRIDGE="${BRIDGE:-../resolume-ofx-bridge}"
+
 BUILD="${BUILD:-build-universal}"
 failures=0
 
@@ -417,8 +433,7 @@ if [ "$(uname)" = "Darwin" ]; then
 		fi
 		rm -rf "$tmp"
 
-		OFXPROBE="${OFXPROBE:-../resolume-ofx-bridge/build/ofxprobe}"
-		[ -x "$OFXPROBE" ] || OFXPROBE="$HOME/Projects/resolume/resolume-ofx-bridge/build/ofxprobe"
+		OFXPROBE="${OFXPROBE:-$BRIDGE/build/ofxprobe}"
 		if [ -x "$OFXPROBE" ]; then
 			# --dir ADDS a search path, and the first identifier match wins:
 			# a stale copy in /Library/OFX/Plugins would be read instead, so
