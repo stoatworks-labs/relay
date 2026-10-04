@@ -49,11 +49,12 @@
 #                 it: universal, OfxGetPlugin exported, the plist naming the
 #                 binary on disk, an ad-hoc sign, and ofxprobe loading it and
 #                 reading back its identifier, label, group and context
-#   openfx        with OFXHOST set to an ofxprobe that hosts transitions: the
-#   rendered      bundle rendered -- SourceFrom before the switch and SourceTo
-#                 on the last frame byte for byte (Ends Fade), not under Cut,
-#                 and --quirks fusion's no-frame-rate host giving the 24 fps
-#                 frame. Skipped without OFXHOST
+#   openfx        with an ofxprobe that hosts transitions (OFXHOST, else the
+#   rendered      bridge's own when its --help offers --context): the bundle
+#                 rendered -- SourceFrom before the switch and SourceTo on the
+#                 last frame byte for byte (Ends Fade), not under Cut, and
+#                 --quirks fusion's no-frame-rate host giving the 24 fps
+#                 frame. Skipped without such a host
 #   bench         the render cost, for the record. Not pass/fail -- there is
 #                 no threshold worth asserting on somebody else's GPU -- but
 #                 a verify run leaves a timing on the record, which is what
@@ -400,9 +401,10 @@ fi
 # CFBundleExecutable that names the previous plugin's binary passes the
 # build, lipo, nm and a probe, and fails only in the release job's codesign.
 #
-# ofxprobe instantiates the Filter context only, and this plugin is a
-# Transition, so it can load and describe the bundle but not render it. The
-# render is skipped, and said so; the pictures are rltest --transition's.
+# This asks ofxprobe for its default Filter context, which a Transition does
+# not offer, so it loads and describes the bundle but does not render it. The
+# render is the next step's, as a Transition, when a host offers --context;
+# rltest --transition's pictures are the check that always runs.
 #---------------------------------------------------------------------------
 OFX_BUNDLE="$BUILD/Relay.ofx.bundle"
 OFX_BIN="$OFX_BUNDLE/Contents/MacOS/Relay.ofx"
@@ -463,7 +465,7 @@ if [ "$(uname)" = "Darwin" ]; then
 			esac
 			render=$("$OFXPROBE" --dir "$BUILD" --render com.stoatworks.relay --size 320x180 --out "$(mktemp -d)/ofx.bmp" 2>&1)
 			case "$render" in
-				*"Filter context"*) printf '   skipped: this ofxprobe hosts the Filter context only -- rltest --transition is the render check\n' ;;
+				*"Filter context"*) printf '   skipped: no Filter context to render in -- the Transition render is the next step\n' ;;
 				*rendered*) pass "ofxprobe renders it" ;;
 				*) fail "ofxprobe could not render it"; printf '%s\n' "$render" | sed 's/^/      /' ;;
 			esac
@@ -475,9 +477,10 @@ fi
 
 #---------------------------------------------------------------------------
 # The OpenFX transition RENDERED, when a host with the Transition context is
-# at hand: OFXHOST names it (the fleet's extended ofxprobe, with --context
-# transition, --transition-ramp and --quirks). Without it this step skips --
-# rltest --transition is the render check that always runs.
+# at hand: OFXHOST names it, or else the bridge's own ofxprobe, which has had
+# --context transition, --transition-ramp and --quirks since resolume-ofx-
+# bridge aa7a1d3, is used when its --help says so. Without either this step
+# skips -- rltest --transition is the render check that always runs.
 #
 # A one-second transition at 24 fps, defaults: the frame before the switch is
 # SourceFrom byte for byte, the last frame is SourceTo byte for byte under
@@ -485,6 +488,12 @@ fi
 # anywhere; stricter than Resolve's Fusion page, which reports the effect's)
 # the switching frames are the 24 fps fallback's, byte for byte.
 #---------------------------------------------------------------------------
+# Captured and matched, not piped into grep -q (see the symbols check above).
+if [ -z "${OFXHOST:-}" ] && [ -x "${OFXPROBE:-}" ]; then
+	case "$("$OFXPROBE" --help 2>&1)" in
+		*--context*) OFXHOST="$OFXPROBE" ;;
+	esac
+fi
 if [ -n "${OFXHOST:-}" ] && [ -x "$OFXHOST" ] && [ -d "$OFX_BUNDLE" ]; then
 	step "openfx transition, rendered (OFXHOST)"
 	tmp=$(mktemp -d)
