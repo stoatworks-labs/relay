@@ -244,9 +244,11 @@ build's GPU render of the same cards to **one 8-bit code** (see
 - **A host that reports no frame rate** is taken as 24 fps. Resolve's Fusion
   page reports the frame rate on the effect but not on its clips, and Relay
   reads the effect's. Fusion has no transition slot, but Relay does load as a
-  Fusion tool, with Transition as an ordinary control that has to be
-  animated. Keyed 0→0.6 and then held, it showed plain SourceTo there where
-  the test host shows the coil moving — not yet understood.
+  Fusion tool, with Transition as an ordinary control: animate it, or the
+  relay sits at rest. Keyed 0→0.6 there, it switches, bounces and rolls
+  as in the test host (the same roll to four figures at every frame
+  measured, in Resolve Studio 21.1), and has settled about two-thirds of a
+  second after the switch.
 
 ## Build
 

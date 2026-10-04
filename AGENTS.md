@@ -610,10 +610,18 @@ Fusion page: every fleet generator rendered frames 20-22 byte-identical, none ha
 declared it, and with the declaration they animate.
 
 A tool fed by a MediaIn is re-rendered every frame either way, so in Fusion this
-changes nothing visible. Separately, and with or without the flag, Relay held at a
-mid Transition in Fusion shows plain SourceTo where `ofxprobe` shows the coil moving
--- an open question about how Fusion answers the Transition curve at other times,
-not a caching one.
+changes nothing visible.
+
+**Relay in Fusion matches the test host** (2026-10-04, Resolve Studio 21.1, a
+debug build logging the plan). With Transition keyed 0→0.6 over frame 0→1 and
+held, Fusion answers the curve at past times exactly (a raw-API probe read 0, 0.3
+and 0.6 at frames 0, 0.5 and 1 from a render at frame 20). It reports an effect
+duration of 121, so the history starts well before the crossing. The relay
+computes the same roll as `ofxprobe` at every frame measured: 0.190932 / 0.190929
+at frame 2, then 0.0755 and -0.0141, and 0.000135 by frame 20. The pixels show the
+roll at frames 2 and 3 and a settled SourceTo by frame 20. An earlier note here
+called Fusion's plain SourceTo at frames 20-22 an open question; it was only the
+settled relay, and the test host's frames there differ by sub-row residue alone.
 
 The flag changes no pixels: `ofxprobe` renders byte-identical with and without it,
 on a moving sequence, on a still and under `--quirks fusion`.
