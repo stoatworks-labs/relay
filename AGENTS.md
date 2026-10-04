@@ -5,13 +5,15 @@ between this layer and the layer below the way a relay-switched router did:
 with hysteresis on the coil, bounce on the contacts, a monitor that has to
 re-lock, and a capacitor's worth of crosstalk. C++17 + GLSL 4.10, CMake,
 universal macOS `.bundle` and a Windows `.dll`. MIT. Intended home
-`github.com/stoatworks-labs/relay`, released v0.1.0 2026-09-24. Never loaded
-into Resolume on macOS; probed by hand in Arena 7.27.1 on Windows the same day
-(see "What Relay showed in Arena"). The fleet's third mixer, after genlock
+`github.com/stoatworks-labs/relay`, released v0.1.0 2026-09-24; v0.2.0 adds
+the OpenFX build. Never loaded into Resolume on macOS; probed by hand in Arena
+7.27.1 on Windows the same day (see "What Relay showed in Arena"). The fleet's third mixer, after genlock
 and wipe. It also builds as an **OpenFX transition** for Resolve and Vegas
 (`source/ofx/RelayOFX.cpp`, CPU render): see "The OpenFX build" below. Its
 first build ran in DaVinci Resolve 21.1 on the Edit page (2026-10-03); the
-current defaults (Pull-in 0.5, Ends) have not been in a real host.
+current one, with Pull-in 0.5 and Ends, ran in DaVinci Resolve Studio 21.1 on
+macOS on the Edit page (2026-10-04), switching at the midpoint and ending
+exactly on SourceTo.
 
 `CLAUDE.md` is the command reference. This file is the *why*: the idea, every
 number in the harness and where it comes from, the traps this build actually
@@ -334,9 +336,9 @@ at 4K. As genlock found, a tenth of a millisecond is close to what a
 - **The hero image** is the harness's render, not Resolume's.
 - The About block is generated now (`sync-about.py`), with the User guide
   button: 22 parameters, 17 swept. No presets. The OpenFX build is a
-  transition that has never been in a real host; see *The OpenFX build*. The
-  browser demo exists and is a port, not the plugin; see *The browser demo*
-  below.
+  transition whose only real host so far is Resolve on macOS; see *The OpenFX
+  build*. The browser demo exists and is a port, not the plugin; see *The
+  browser demo* below.
 
 ---
 
@@ -573,6 +575,14 @@ from the effect's duration reaches far enough; frames after the transition
 exactly SourceTo; the roll still running on the last frame (6.4% of pixels
 not yet SourceTo), then a pop. That pop is why Pull-in and Ends changed.
 
+**In a real host: DaVinci Resolve Studio 21.1, macOS, Edit page, 2026-10-04**
+(the lead, with the current build at its defaults: Pull-in 0.5, Ends Fade). A
+24-frame centred transition at 24 fps: frames exactly SourceFrom until the
+switch at the midpoint, frame 12 of 24 -- the settling table's switch frame;
+the bounce and the roll then played; the transition's last frame exactly
+SourceTo, so no pop. That last frame is the case `EndProgress` exists for
+(Resolve's last frame does not reach progress 1), and it held in the host.
+
 **No frame rate (`--quirks fusion`, 2026-10-04).** The test host's Fusion
 mode -- no FrameRate on the effect or any clip, frame ranges [0, 0], the
 Unmapped pair and the render-status props absent -- renders this build at
@@ -583,10 +593,10 @@ frame-rate read was already guarded, falling back to 25, and its quirks
 frames equal its own 25 fps frames. `verify.sh` runs the check when `OFXHOST`
 names the extended host.
 
-**Not verified:** the current build in any real host -- Pull-in 0.5 and Ends
-have not been in Resolve. Never loaded into Vegas, Nuke or Natron. The Windows
-and Linux builds have only compiled (and, on Linux, `dlopen`ed on Rocky 8 in
-CI); 16-bit and RGB-only clips have not been rendered by any host.
+**Not verified:** any real host but Resolve on macOS. Never loaded into Vegas,
+Nuke or Natron. The Windows and Linux builds have only compiled (and, on
+Linux, `dlopen`ed on Rocky 8 in CI); 16-bit and RGB-only clips have not been
+rendered by any host.
 
 ---
 

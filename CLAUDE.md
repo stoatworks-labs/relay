@@ -4,10 +4,11 @@ An A/B cut made by a relay — bounce and all — as an FFGL **mixer** for
 Resolume Arena/Avenue, and an OpenFX **transition** for Resolve/Vegas.
 C++/GLSL, CMake MODULE → universal `.bundle` (macOS) + Windows `.dll`, and
 `Relay.ofx.bundle` (macOS universal, Win64, Linux). MIT. Public, released
-v0.1.0; never loaded into Resolume on macOS, probed by hand in Arena 7.27.1 on
-Windows (the fleet's third mixer, after genlock and wipe). The OpenFX build's
-first version ran in DaVinci Resolve 21.1 (Edit page); the current defaults
-have not.
+v0.1.0 (FFGL only) and v0.2.0 (adds the OpenFX build); never loaded into
+Resolume on macOS, probed by hand in Arena 7.27.1 on Windows (the fleet's third
+mixer, after genlock and wipe). The OpenFX build, current defaults, ran in
+DaVinci Resolve Studio 21.1 on macOS (Edit page, 2026-10-04): clean cut at the
+midpoint, clean end. Never in Vegas, Nuke or Natron.
 
 Read `AGENTS.md` before changing the schedule, the raster mapping, the PLL or
 any tolerance in the harness. Read `~/Projects/resolume/genlock/AGENTS.md`
@@ -169,11 +170,15 @@ Every check runs at 640x360 and 320x180 and carries its own negative control.
 - **Never loaded into Resolume on macOS.** Everything numeric is measured
   offline through the real plugin class. On Windows: probed by hand in Arena
   7.27.1 on software rendering, see AGENTS.md.
-- **The current OpenFX build has not been in a real host.** Its first version
-  ran in Resolve 21.1 (Edit page): exactly SourceFrom until the switch, the
-  bounce and roll played (Resolve answers `Transition` at other times), exactly
-  SourceTo after -- but the roll popped at the end, hence Pull-in 0.5 and Ends,
-  which Resolve has not seen. Vegas never.
+- **The OpenFX build has been in one real host: Resolve, on macOS.** Its first
+  version ran in Resolve 21.1 (Edit page, 2026-10-03): exactly SourceFrom until
+  the switch, the bounce and roll played (Resolve answers `Transition` at other
+  times), exactly SourceTo after -- but the roll popped at the end, hence
+  Pull-in 0.5 and Ends. The current build ran in Resolve Studio 21.1 (Edit
+  page, 2026-10-04, 24-frame centred transition at 24 fps): exactly SourceFrom
+  until the switch at frame 12 of 24, bounce and roll, the last frame exactly
+  SourceTo. Vegas, Nuke and Natron never; the Windows and Linux OpenFX builds
+  have never rendered in a host.
 - No presets. There is a user guide (`docs/USER-GUIDE.md`). The browser demo
   exists; it is a port, not the plugin.
 

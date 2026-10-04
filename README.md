@@ -15,9 +15,10 @@
 > macOS**; on Windows it has run in Resolume Arena 7.27.1, on software rendering,
 > as a layer's Blend Mode. It is the fleet's third FFGL *mixer*, after genlock and
 > wipe. The [OpenFX build](#openfx--resolve-vegas-nuke-natron) is a transition: it
-> agrees with the FFGL build to **one 8-bit code** in a test host, and an earlier
-> build of it has run as a transition in **DaVinci Resolve 21.1** (the switch, the
-> bounce and the roll all where they should be); the current defaults have not.
+> agrees with the FFGL build to **one 8-bit code** in a test host, and it has run
+> as a transition in **DaVinci Resolve Studio 21.1** on macOS (the switch at the
+> midpoint, the bounce and the roll, and a last frame that is exactly the
+> incoming clip); never in Vegas, Nuke or Natron.
 > Check it in your own rig before trusting it in a show.
 
 An A/B cut made by a relay — bounce and all — as an FFGL **mixer** for
@@ -160,8 +161,12 @@ declares the Transition context only, so it appears wherever a host offers
 OpenFX transitions and nowhere else; whether Nuke or Natron list it has not
 been checked.
 
-Grab the `relay-ofx-*` zip for your platform from the release and copy
-`Relay.ofx.bundle` into the standard OpenFX folder, then restart the host:
+The OpenFX build ships from **v0.2.0**, as its own zip beside the Resolume
+downloads: `relay-ofx-macos-universal.zip`, `relay-ofx-windows-x86_64.zip`
+and `relay-ofx-linux-x86_64.zip` on the
+[release page](https://github.com/stoatworks-labs/relay/releases). Copy
+`Relay.ofx.bundle` from the one for your platform into the standard OpenFX
+folder, then restart the host:
 
 ```
 macOS    /Library/OFX/Plugins/
@@ -288,9 +293,11 @@ number and where it comes from.
 
 ## Status
 
-**v0.1.0, and honestly early.** Verified by measurement on an Apple M4 Max,
-macOS 26.4.1, 2026-09-24, at 640×360 **and** 320×180 unless stated, on the GPU
-and on Apple's software renderer:
+**v0.2.0, and honestly early.** v0.2.0 adds the OpenFX transition build; the
+Resolume mixer is unchanged from v0.1.0. Verified by measurement on an Apple
+M4 Max, macOS 26.4.1, 2026-09-24 (the OpenFX rows 2026-10-03 and 10-04), at
+640×360 **and** 320×180 unless stated, on the GPU and on Apple's software
+renderer:
 
 | Check | Result |
 | --- | --- |
@@ -343,20 +350,25 @@ model constants, not measurements of any relay. There is a
 presets. The [browser demo](https://relay-demo.stoatworks-labs.com)
 is a port of the plugin, not the plugin.
 
-**In a real host, once.** The first OpenFX build (Pull-in 0.7, no Ends) was
-loaded into **DaVinci Resolve 21.1** on the Edit page as a 24-frame centred
-transition between two stills at 24 fps (2026-10-03): the
+**In a real host: DaVinci Resolve, twice.** The first OpenFX build (Pull-in
+0.7, no Ends) was loaded into **DaVinci Resolve 21.1** on the Edit page as a
+24-frame centred transition between two stills at 24 fps (2026-10-03): the
 frames were exactly SourceFrom until the switch on frame 17 of 24, the bounce
 and the roll then played — so Resolve does answer the Transition parameter at
 other times, which the whole reformulation rests on — and the frames after the
 transition were exactly SourceTo. The roll was still running on the
 transition's last frame and popped to the clean clip on the next; Pull-in 0.5
-and Ends are the answer, and **they have not been in Resolve yet**. Nothing has
-been in Vegas, and the Windows and Linux builds have only been compiled and, on
-Linux, `dlopen`ed on Rocky 8. Where the transition starts is taken as the
-effect's duration back from the frame being rendered (the output's frame range
-if a host reports no duration) — an assumption about the host, borne out on
-Resolve's Edit page.
+and Ends are the answer. The build that ships in v0.2.0, with those defaults
+(Pull-in 0.5, Ends Fade), was then run in **DaVinci Resolve Studio 21.1** on
+macOS on the Edit page as a 24-frame centred transition at 24 fps
+(2026-10-04): exactly SourceFrom until the switch at the midpoint, frame 12 of
+24, then the bounce and the roll, and the transition's last frame exactly
+SourceTo — no pop. Nothing has been in Vegas, Nuke or Natron, and the Windows
+and Linux OpenFX builds have only been compiled and, on Linux, `dlopen`ed on
+Rocky 8: neither has rendered in a host. Where the transition starts is taken
+as the effect's duration back from the frame being rendered (the output's
+frame range if a host reports no duration) — an assumption about the host,
+borne out on Resolve's Edit page.
 
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, and the traps.

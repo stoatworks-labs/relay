@@ -19,8 +19,8 @@ harness, not captured from Resolume. The top was scanned while the relay was sti
 on A; the black bands are the open contact in flight; below each is B, arriving,
 and rolled, because the monitor has not pulled B's field phase in yet.*
 
-> **Before you rely on this:** released at **v0.1.0**, and honestly early. The relay
-> is measured, not just asserted. An offline harness drives the real plugin with two
+> **Before you rely on this:** released at **v0.2.0**, which adds the OpenFX
+> transition build, and honestly early. The relay is measured, not just asserted. An offline harness drives the real plugin with two
 > inputs at two different sizes, on the GPU and on Apple's software renderer. The
 > switching frame's bands sit where the bounce schedule puts them, with **every
 > pixel** away from a cut exactly right and all **16 contact events** seen within one
@@ -32,8 +32,9 @@ and rolled, because the monitor has not pulled B's field phase in yet.*
 > It has **never been loaded into Resolume on macOS**.
 > On Windows, a build of v0.1.0 loads in Resolume Arena 7.27.1, is offered as a layer's Blend Mode and as a transition, is driven by the layer's opacity fader and by a layer transition, and hides only Standard, as designed — on software rendering, and no picture of it inside Resolume has been captured, so a correct render there is not yet shown.
 > The OpenFX transition agrees with the Resolume build to one 8-bit code in a test
-> host; an earlier version of it has run in DaVinci Resolve 21.1, and the current
-> defaults have not.
+> host, and has run in DaVinci Resolve Studio 21.1 on macOS, on the Edit page: the
+> cut at the midpoint, the bounce and the roll, and a last frame that is exactly
+> the incoming clip. It has not been tried in Vegas, Nuke or Natron.
 > **Try it on a spare layer first**, and please report anything that misbehaves.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human
@@ -47,7 +48,7 @@ Download the build for your platform. For macOS there is a universal `.dmg` or
 `.zip` (Apple silicon and Intel), **Developer ID-signed and notarised** so the bundle
 simply loads (the signing happens on the maintainer's Mac shortly after each release
 is published, so a download made in the first minutes may need **Open** from the
-context menu once), and for Windows an x64 installer or `.zip`. Every download
+context menu once), and for Windows an x64 installer or `.zip`. Each of these
 carries one mixer, **SW Relay**. Put it in Resolume's FFGL folder, then restart
 Resolume:
 
@@ -69,8 +70,10 @@ The Windows builds are not code-signed. Plugin files are not gated the way `.exe
 files are, so Resolume loads them as normal; only the installer trips SmartScreen,
 once: **More info** → **Run anyway**.
 
-For DaVinci Resolve or Vegas, download the `relay-ofx-` zip for your platform
-instead and see [In Resolve and other OpenFX hosts](#in-resolve-and-other-openfx-hosts).
+For DaVinci Resolve or Vegas, download the OpenFX zip for your platform instead
+(`relay-ofx-macos-universal.zip`, `relay-ofx-windows-x86_64.zip` or
+`relay-ofx-linux-x86_64.zip`, released from v0.2.0) and see
+[In Resolve and other OpenFX hosts](#in-resolve-and-other-openfx-hosts).
 
 ---
 
@@ -312,8 +315,10 @@ failed to compile.
 
 ## In Resolve and other OpenFX hosts
 
-The OpenFX build is a **transition**. Put `Relay.ofx.bundle` from the
-`relay-ofx-` zip in the OpenFX plugin folder and restart the host:
+The OpenFX build is a **transition**, released from v0.2.0 as its own zip for
+each platform: `relay-ofx-macos-universal.zip`, `relay-ofx-windows-x86_64.zip`
+and `relay-ofx-linux-x86_64.zip`. Put the `Relay.ofx.bundle` from it in the
+OpenFX plugin folder and restart the host:
 
 ```
 macOS    /Library/OFX/Plugins/
@@ -362,10 +367,12 @@ had reached — one frame sooner than Resolume, which reads its fader at the
 start of each frame, can show it.
 
 It runs on the CPU: about 3 ms a frame at 1920×1080 (10 ms with Crosstalk at 1)
-on an Apple M4 Max in a test host. An earlier version, with Pull-in at 0.7 and
-no Ends, has run in DaVinci Resolve 21.1 on the Edit page; this one has not been
-in Resolve or Vegas yet, so please report what you see. A host that reports no
-frame rate is taken as 24 fps.
+on an Apple M4 Max in a test host. This version has run in DaVinci Resolve
+Studio 21.1 on macOS, on the Edit page: a 24-frame transition at 24 fps was the
+outgoing clip exactly until the cut at its midpoint, then bounced and rolled,
+and its last frame was exactly the incoming clip. It has not been in Vegas yet,
+so please report what you see there, and in Resolve on Windows or Linux. A host
+that reports no frame rate is taken as 24 fps.
 
 ---
 
@@ -391,11 +398,12 @@ frame rate is taken as 24 fps.
   a transparent one cuts the transparency too, as a router would. The open contact
   is opaque.
 - **No presets.**
-- **The OpenFX transition is barely tried in real hosts.** An earlier version
-  ran in DaVinci Resolve 21.1; the current one, with Pull-in 0.5 and Ends, has
-  not, and nothing has been tried in Vegas. It relies on the host reporting the
-  transition's progress at times other than the frame being drawn, which
-  Resolve does; a host that did not would give a plain cut at Pull-in.
+- **The OpenFX transition is barely tried in real hosts.** It has run in DaVinci
+  Resolve Studio 21.1 on macOS only. Nothing has been tried in Vegas, Nuke or
+  Natron, and the Windows and Linux builds have not rendered in any host. It
+  relies on the host reporting the transition's progress at times other than
+  the frame being drawn, which Resolve does; a host that did not would give a
+  plain cut at Pull-in.
 - **There is a browser demo** at [relay-demo.stoatworks-labs.com](https://relay-demo.stoatworks-labs.com).
   It is a port to a web page, not the plugin: the shaders run in WebGL2 and the
   relay's CPU half is rewritten in JavaScript. The page lists what it does not
