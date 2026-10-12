@@ -1,50 +1,48 @@
 # Relay
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
-> (Anthropic), directed and reviewed by a human author. The relay is not
-> asserted but measured: an offline harness drives the real plugin class in a
-> headless GL context with **two** input textures at two different resolutions
-> and checks each claim against a closed form — the switching frame's bands at
-> the scanlines the bounce schedule predicts, every pixel away from a cut
-> **exactly** right and each event seen within one line's blanking of when it
-> happened; the coil switching at Pull-in on the way up and at Drop-out on the
-> way down, **41 of 41 frames bitwise**; the re-lock following the second-order
-> step response to **0.002 rows** over 150 frames with the log decrement and the
-> zero crossing read off the picture; the crosstalk doubling per octave to
-> **0.013** (see [Status](#status)). It has **never been loaded into Resolume on
-> macOS**; on Windows it has run in Resolume Arena 7.27.1, on software rendering,
-> as a layer's Blend Mode. It is the fleet's third FFGL *mixer*, after genlock and
-> wipe. The [OpenFX build](#openfx--resolve-vegas-nuke-natron) is a transition: it
-> agrees with the FFGL build to **one 8-bit code** in a test host, and it has run
-> as a transition in **DaVinci Resolve Studio 21.1** on macOS (the switch at the
-> midpoint, the bounce and the roll, and a last frame that is exactly the
-> incoming clip); never in Vegas, Nuke or Natron.
-> Check it in your own rig before trusting it in a show.
+> (Anthropic), directed and reviewed by a human author. It has **never been loaded into Resolume
+> on macOS**; on Windows it's run in Resolume Arena 7.27.1, on software rendering, as a layer's
+> Blend Mode. The [OpenFX build](#openfx--resolve-vegas-nuke-natron) is a transition, and it's run
+> as one in **DaVinci Resolve Studio 21.1** on macOS (the switch at the midpoint, the bounce and
+> the roll, and a last frame that's exactly the incoming clip), but never in Vegas, Nuke or
+> Natron. The rest is measured by an offline harness that drives the real plugin class in a
+> headless GL context with two inputs at two different resolutions, and checks each claim against
+> a closed form: the bounce's bands land on the scanlines the schedule predicts, the coil switches
+> at Pull-in and Drop-out 41 of 41 frames bitwise, the re-lock follows the second-order step
+> response to 0.002 rows over 150 frames, the crosstalk doubles per octave to 0.013, and the OpenFX build
+> agrees with the FFGL one to one 8-bit code. The full list is under [Status](#status). Check it
+> in your own rig before you trust it in a show.
 
-An A/B cut made by a relay — bounce and all — as an FFGL **mixer** for
-[Resolume](https://resolume.com) Arena and Avenue, and as an OpenFX
-**transition** for DaVinci Resolve and Vegas.
+An A/B cut made by a relay, bounce and all, as an FFGL mixer for
+[Resolume](https://resolume.com) Arena and Avenue and as an OpenFX
+transition for DaVinci Resolve and Vegas. It's the fleet's third FFGL mixer,
+after genlock and wipe. You get the switching frame in bands of A, black and B
+where the contacts bounced, the roll while the monitor pulls the new source in,
+and a faint ghost of the other input through the open contact: everything a
+cheap switcher used to do to a picture, without having to find one that still
+works.
 
 ![The switching frame: bands of A, black and B where each contact bounce landed](docs/hero.png)
 
 <sub>The repo's two test cards through the plugin on the frame the switch
-lands on — Operate Time 6 ms, Bounce Time 2 ms, Restitution 0.63 — rendered
-by `rltest`, the offline harness, not captured from Resolume. The upper part
-of the picture was scanned while the relay was still on A; the black bands are
-the open contact in flight; the picture below each is B, arriving — and
-rolled, because the monitor has not pulled B's field phase in yet.</sub>
+lands on (Operate Time 6 ms, Bounce Time 2 ms, Restitution 0.63), rendered
+by `rltest`, the offline harness, rather than captured from Resolume. The upper
+part of the picture was scanned while the relay was still on A, the black bands
+are the open contact in flight, and the picture below each is B arriving,
+rolled because the monitor hasn't pulled B's field phase in yet.</sub>
 
 [![Relay — an A/B cut made by a relay, bounce and all, for Resolume](docs/video-thumb.png)](https://www.youtube.com/watch?v=NRwl0iCd7_g)
 
-*[Watch it](https://www.youtube.com/watch?v=NRwl0iCd7_g) — 53 seconds:
+*[Watch it](https://www.youtube.com/watch?v=NRwl0iCd7_g) (53 seconds):
 the fader up past Pull-in and the cut to B with its roll, the switching frame
 held so the bands of A, black and B can be read, the fader down past Drop-out,
 a longer livelier bounce, an underdamped re-lock, genlocked vertical-interval
-cuts, and crosstalk with three Take presses. Every frame is the real plugin's
-output: an FFGL plugin has no window, so the footage is rendered by this
-repository's own offline harness (`rltest --pipe`, driven by a cue sheet)
-rather than filmed off a screen, the clips are Resolume's bundled demo media,
-and the two held frames are stills of frames the plugin rendered.*
+cuts, and crosstalk with three Take presses. It's all the plugin's own output.
+An FFGL plugin doesn't have a window to film, so the footage comes from this
+repo's offline harness (`rltest --pipe`, driven by a cue sheet) rather than a
+screen, the clips are Resolume's bundled demo media, and the two held frames
+are stills of frames the plugin rendered.*
 
 <!-- downloads:start -->
 
@@ -91,23 +89,23 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 
 ## A relay is a coil, an armature and two contacts
 
-A cheap video switcher — a SCART box, an old routing switcher — cuts with a
+A cheap video switcher (a SCART box, an old routing switcher) cuts with a
 relay. Each of its parts does something to the picture, because a video frame
 is scanned in time and a relay's events happen in milliseconds, about fifteen
 lines each:
 
 - **The coil has hysteresis.** It pulls in at one voltage and drops out at a
   much lower one. The input named `Opacity` is the coil voltage, and Resolume
-  binds a mixer's `Opacity` to the layer's opacity fader — so the fader cuts to
+  binds a mixer's `Opacity` to the layer's opacity fader, so the fader cuts to
   B high on the way up and back to A low on the way down, and nothing in
   between is a dissolve.
 - **The contacts bounce.** When the armature moves, the moving contact leaves
   A (the output is open: no signal, black), flies to B, hits, rebounds and
   hits again, each bounce shorter than the last by the coefficient of
-  restitution. The frame the switch lands on shows **horizontal bands** of A,
+  restitution. The frame the switch lands on shows horizontal bands of A,
   black and B at the scanlines set by the bounce times, cut mid-line at the
   pixel where the contact landed.
-- **The receiver re-locks.** If the two sources are not genlocked, the new
+- **The receiver re-locks.** If the two sources aren't genlocked, the new
   source's field timing is somewhere else. The monitor's vertical PLL pulls it
   in as a second-order step response, so the picture rolls and settles,
   overshooting if the loop is underdamped, and the line PLL tears the first
@@ -121,29 +119,29 @@ Vert Interval is that cure: the break waits for the blanking before the next
 field, so the bounce lands at the top of the frame and, with a short enough
 bounce, nowhere.
 
-**It is a mixer, not an effect.** It needs a layer below it: that layer is A,
+**It's a mixer rather than an effect.** It needs a layer below it: that layer is A,
 and the clip on this layer is B, which the energised coil selects.
 
-**[Try it in your browser](https://relay-demo.stoatworks-labs.com)** — the
+**[Try it in your browser](https://relay-demo.stoatworks-labs.com)**: it's the
 plugin's own shader in WebGL2 with its coil, bounce schedule, raster mapping,
 re-lock and crosstalk filter ported to JavaScript, switching between two
-generated clips. A port, not the plugin: the page lists everything it does
-not reproduce, starting with the fact that in Resolume the coil voltage is the
-layer's opacity fader.
+generated clips. It's a port rather than the plugin, and the page lists
+everything it doesn't reproduce, starting with the fact that in Resolume the
+coil voltage is the layer's opacity fader.
 
 ## The controls
 
 **Raster** — Standard (PAL or NTSC: the line period and the active line count
 the host frame is scanned as) and Switch Point (Anywhere, or Vert Interval).
-Standard is first on purpose: Resolume Arena does not show a mixer's first
+Standard is first on purpose: Resolume Arena doesn't show a mixer's first
 parameter (measured on genlock and wipe), so index 0 holds the one control
-whose default — PAL — is right if nobody can ever reach it.
+whose default, PAL, is right if nobody can ever reach it.
 
 **Coil** — Opacity, Pull-in, Drop-out, Operate Time (0–40 ms from the
 threshold to the contact leaving its rest), Select and Take. **Opacity is the
-coil voltage**: it is named Opacity on purpose, because Resolume binds a mixer
-parameter of that name to the **layer's opacity fader**, so the layer's own
-fader drives the relay. Select (a switch) and Take (a button) invert what an
+coil voltage**: it's named Opacity on purpose, because Resolume binds a mixer
+parameter of that name to the layer's opacity fader, so the layer's own fader
+drives the relay. Select (a switch) and Take (a button) invert what an
 energised coil selects, for a host without that binding.
 
 **Contacts** — Bounce Time (the first bounce, 0–4 ms), Restitution (0–0.9:
@@ -159,18 +157,18 @@ the signal's own frequency; below it the leak falls 6 dB an octave).
 
 ## OpenFX — Resolve, Vegas, Nuke, Natron
 
-The same relay also builds as an OpenFX plugin — as a **transition**, because
-that is what a cut between two clips is on a timeline. Put **Relay** (under
+The same relay also builds as an OpenFX plugin, as a **transition**, because
+that's what a cut between two clips is on a timeline. Put **Relay** (under
 *Stoatworks*) between two clips in DaVinci Resolve or Vegas Pro: the outgoing
 clip (`SourceFrom`) is A, the incoming one (`SourceTo`) is B, and the
-transition's own progress — 0 at its start, 1 at its end — is the coil voltage.
-So the relay cuts where the progress passes Pull-in — half way through by
-default, the edit point of a centred transition — with the bounce, the roll
+transition's own progress (0 at its start, 1 at its end) is the coil voltage.
+So the relay cuts where the progress passes Pull-in (half way through by
+default, the edit point of a centred transition) with the bounce, the roll
 and the crosstalk of the Resolume build, and over the last 15% of the
-transition fades to exactly the incoming clip so the roll does not pop. It
-declares the Transition context only, so it appears wherever a host offers
-OpenFX transitions and nowhere else; whether Nuke or Natron list it has not
-been checked.
+transition it fades to exactly the incoming clip so the roll doesn't pop. It
+declares the Transition context only, so it turns up wherever a host offers
+OpenFX transitions and nowhere else. I haven't checked whether Nuke or Natron
+list it.
 
 The OpenFX build ships from **v0.2.0**, as its own zip beside the Resolume
 downloads: `relay-ofx-macos-universal.zip`, `relay-ofx-windows-x86_64.zip`
@@ -185,21 +183,21 @@ Windows  C:\Program Files\Common Files\OFX\Plugins\
 Linux    /usr/OFX/Plugins/
 ```
 
-It is the same relay, not a lookalike: the coil, the bounce schedule, the
+It's the same relay rather than a lookalike: the coil, the bounce schedule, the
 raster mapping, the re-lock and the crosstalk filter are the same C++ the
 Resolume build runs, and the per-pixel pass is the shader transcribed line for
 line. Hosted in a test host, the plugin's frames agree with the Resolume
 build's GPU render of the same cards to **one 8-bit code** (see
 [Status](#status)).
 
-**What is different from the Resolume build, and why:**
+What's different from the Resolume build, and why:
 
 - **No Opacity.** The host's transition progress is the coil voltage. Resolume
   binds the mixer's Opacity to the layer's fader; a timeline has the
   transition's progress instead.
 - **Pull-in defaults to 0.5, not 0.7.** In Resolume Pull-in is a fader
   position, and 0.7 makes the coil pull in high on the way up. On a timeline
-  it is where in the transition the cut lands: at 0.7 it was 70% of the way
+  it's where in the transition the cut lands: at 0.7 it was 70% of the way
   through, and in DaVinci Resolve 21.1 a one-second transition was still
   rolling on its last frame (6.4% of the picture not yet the incoming clip)
   and popped to the clean clip on the next. At 0.5 the relay switches at the
@@ -208,20 +206,20 @@ build's GPU render of the same cards to **one 8-bit code** (see
   coil last moved and carries the bounce and the roll from frame to frame. An
   OpenFX host renders frames in any order, alone and on several threads, so
   each frame reads the transition's progress back from the start of the
-  transition, finds where it crossed Pull-in — to a fraction of a frame, where
-  Resolume, which reads its fader once a frame, can only know which frame —
+  transition, finds where it crossed Pull-in (to a fraction of a frame, where
+  Resolume, which reads its fader once a frame, can only know which frame)
   and works the bounce and the roll out from there in closed form. Any frame
   renders on its own, and the same frame always renders the same.
 - **Hysteresis on a timeline.** Pull-in is where the rising progress cuts to
-  SourceTo. Drop-out matters only if the progress comes back down — a reversed
-  or a keyframed transition — and then the relay cuts back to SourceFrom where
+  SourceTo. Drop-out only matters if the progress comes back down (a reversed
+  or a keyframed transition), and then the relay cuts back to SourceFrom where
   the progress reaches Drop-out, not where it re-crosses Pull-in. A transition
   that starts above Pull-in (a reversed one) starts on SourceTo with no switch,
   as the Resolume build does on its first frame.
 - **Select and Take are one fixed choice.** Take is a momentary button in
   Resolume and has no meaning on a timeline; here `Select` picks which clip
-  the relay rests on — *From, then To* (the default) or *To, then From*.
-- **Standard, Switch Point, Select and Genlocked do not animate.** They describe
+  the relay rests on: *From, then To* (the default) or *To, then From*.
+- **Standard, Switch Point, Select and Genlocked don't animate.** They describe
   the installation, not the cut. Every other control can be keyframed, and a
   frame is worked out as if the relay had always had that frame's settings.
 - **A crossing during a frame's own scan cuts that frame.** The progress is
@@ -229,16 +227,16 @@ build's GPU render of the same cards to **one 8-bit code** (see
   scan had reached when the contact moved. Resolume reads its fader at each
   frame's start, so the FFGL build shows the same cut a frame later.
 - **The transition has Ends; the mixer has none.** Half a one-second transition
-  is not enough for the re-lock: at the defaults the picture rolls by more
+  isn't enough for the re-lock: at the defaults the picture rolls by more
   than half a row (at 1080p) for 0.63–0.67 s after the switch at 24, 25 and
-  30 fps, and the roll is not exactly zero for 1.75–1.78 s. So with **Ends** on
+  30 fps, and the roll isn't exactly zero for 1.75–1.78 s. So with **Ends** on
   **Fade**, the default, the last **End Length** of the transition (0.15)
-  crossfades — a smoothstep, in premultiplied colour — from the relay to
+  crossfades (a smoothstep, in premultiplied colour) from the relay to
   exactly SourceTo, and the transition's last frame is the incoming clip
   bitwise. The end is judged one frame ahead, because a host's last frame of a
-  transition need not reach progress 1 (Resolve's did not). **Cut** is the
-  relay to the last frame, and whatever it is doing is cut off there — the
-  first OpenFX build, bit for bit. The same names, options and defaults as
+  transition needn't reach progress 1 (Resolve's didn't). **Cut** is the
+  relay to the last frame, and whatever it's doing is cut off there, which is
+  the first OpenFX build, bit for bit. The same names, options and defaults as
   the lenticular and pilot transitions; only the end is faded, because the
   start is the relay at rest on SourceFrom already.
 - **A host that reports no frame rate** is taken as 24 fps. Resolve's Fusion
@@ -252,7 +250,7 @@ build's GPU render of the same cards to **one 8-bit code** (see
 
 ## Build
 
-Needs CMake and the Resolume FFGL SDK, which is a submodule.
+You'll need CMake and the Resolume FFGL SDK, which is a submodule.
 
 ```bash
 git clone --recursive https://github.com/stoatworks-labs/relay
@@ -263,12 +261,12 @@ cmake --install build    # → ~/Documents/Resolume Arena/Extra Effects
 ```
 
 macOS builds universal (arm64 + x86_64) by default. Add
-`-DCMAKE_OSX_ARCHITECTURES=arm64` for a faster development build.
+`-DCMAKE_OSX_ARCHITECTURES=arm64` for a quicker development build.
 
 The same build makes the OpenFX bundle, `build/Relay.ofx.bundle`; copy it to
 the OpenFX folder above. `-DBUILD_OFX=OFF` leaves it out, and
-`-DRELAY_BUILD_FFGL=OFF` builds it alone with nothing but a compiler — no FFGL
-SDK and no GL loader, which is how the Linux build is made.
+`-DRELAY_BUILD_FFGL=OFF` builds it alone with nothing but a compiler (no FFGL
+SDK and no GL loader), which is how the Linux build is made.
 
 The install path is **Extra Effects**, although this is a mixer. Resolume has
 one FFGL folder, and sources, effects and mixers all load from it: genlock and
@@ -277,8 +275,8 @@ wipe, the fleet's first two mixers, were loaded from there by Resolume Arena
 
 ## Building and testing
 
-The harness renders the real plugin class headlessly, with **two** inputs —
-`--input-a` is A, the layer below; `--input-b` is B, this layer — which may be
+The harness renders the plugin class itself, headless, with two inputs
+(`--input-a` is A, the layer below; `--input-b` is B, this layer), which can be
 different sizes, with different hardware padding, rendered to a third size.
 
     ./build/rltest --out /tmp/frame.png     both cards, through the plugin
@@ -298,11 +296,11 @@ different sizes, with different hardware padding, rendered to a third size.
     python3 tools/sweep.py                  no control is silently dead
     tools/verify.sh                         all of it, on a fresh universal build
 
-Every check runs at **two rasters**, 640×360 and 320×180, on this Mac's GPU
-**and** on Apple's software renderer, and every tolerance is derived from
-something physical — one pixel's scan time, one line's blanking, the GL spec's
-1 part in 10^5 on an interpolated coordinate, a float sum's rounding — rather
-than from the number this machine printed first. Each check carries a
+Every check runs at two rasters, 640×360 and 320×180, on this Mac's GPU and
+on Apple's software renderer, and every tolerance comes from something
+physical (one pixel's scan time, one line's blanking, the GL spec's 1 part in
+10^5 on an interpolated coordinate, a float sum's rounding) rather than from
+whatever number this machine printed first. Each check carries a
 **negative control**, shipped in the plugin as a fault switch the harness can
 throw: the bounce timed in frames, a first-order loop, a flat leak, a coil with
 no hysteresis, one MaxUV for both inputs. [AGENTS.md](AGENTS.md) lists every
@@ -310,7 +308,7 @@ number and where it comes from.
 
 ## Status
 
-**v0.2.0, and honestly early.** v0.2.0 adds the OpenFX transition build; the
+**v0.2.0, and still early days.** v0.2.0 adds the OpenFX transition build; the
 Resolume mixer is unchanged from v0.1.0. Verified by measurement on an Apple
 M4 Max, macOS 26.4.1, 2026-09-24 (the OpenFX rows 2026-10-03 and 10-04), at
 640×360 **and** 320×180 unless stated, on the GPU and on Apple's software
@@ -345,8 +343,9 @@ renderer:
 
 Run `tools/verify.sh` before believing any of it.
 
-**Not done, and the list is honest.** Relay has **never been loaded into
-Resolume on macOS**. On Windows a CI build was probed by hand in **Resolume Arena 7.27.1** (win-lab,
+**What isn't done yet.** Relay has **never been loaded into Resolume on macOS**.
+
+On Windows a CI build was probed by hand in **Resolume Arena 7.27.1** (win-lab,
 Mesa llvmpipe, 2026-09-24) over REST and read back from the plugin's own log: it
 loads from Extra Effects, is offered in every layer's Blend Mode list and in the
 transition list, initialises cleanly, hides exactly one parameter (**Standard,
@@ -355,39 +354,40 @@ shows the coil switching at the fader's 0.2, 0.85, 0.2 and 1.0, and a write to t
 mixer's own Opacity is overridden), shows `Take` as a button that the log sees as
 a latched press, and **a layer transition drives `Opacity`**: with SW Relay as the
 transition blend mode and a 2 s duration, a clip trigger produced switches at
-0.71, 0.05 and 0.71. No picture of the mixer's output in Resolume was captured. That both inputs arrive padded and that
-`SetTime` counts milliseconds is still inherited from genlock and wipe, not
-re-measured on Relay. CI runs both platforms and the Windows DLL compiled first
-time; the harness has never run on a **GPU other than this Mac's** or on
-llvmpipe. The line PLL's tear is a look, not a
-model, and nothing measures it. The dwell fraction of a bounce (half of each
-interval closed) and the approach flight (as long as the first bounce) are
-model constants, not measurements of any relay. There is a
-[user guide](https://stoatworks-labs.com/software/relay/guide/), and no
+0.71, 0.05 and 0.71. No picture of the mixer's output in Resolume was captured,
+though. That both inputs arrive padded, and that `SetTime` counts milliseconds,
+is still taken from genlock and wipe rather than re-measured on Relay.
+
+CI runs both platforms and the Windows DLL compiled first time, but the harness
+has never run on a **GPU other than this Mac's** or on llvmpipe. The line PLL's
+tear is a look rather than a model, and nothing measures it. The dwell fraction
+of a bounce (half of each interval closed) and the approach flight (as long as
+the first bounce) are model constants, not measurements of any relay. There's a
+[user guide](https://stoatworks-labs.com/software/relay/guide/) but no
 presets. The [browser demo](https://relay-demo.stoatworks-labs.com)
-is a port of the plugin, not the plugin.
+is a port of the plugin rather than the plugin itself.
 
 **In a real host: DaVinci Resolve, twice.** The first OpenFX build (Pull-in
 0.7, no Ends) was loaded into **DaVinci Resolve 21.1** on the Edit page as a
 24-frame centred transition between two stills at 24 fps (2026-10-03): the
-frames were exactly SourceFrom until the switch on frame 17 of 24, the bounce
-and the roll then played — so Resolve does answer the Transition parameter at
-other times, which the whole reformulation rests on — and the frames after the
+frames were exactly SourceFrom until the switch on frame 17 of 24, then the
+bounce and the roll played (so Resolve does answer the Transition parameter at
+other times, which the whole reformulation rests on), and the frames after the
 transition were exactly SourceTo. The roll was still running on the
-transition's last frame and popped to the clean clip on the next; Pull-in 0.5
-and Ends are the answer. The build that ships in v0.2.0, with those defaults
+transition's last frame and popped to the clean clip on the next, and Pull-in
+0.5 and Ends are the fix. The build that ships in v0.2.0, with those defaults
 (Pull-in 0.5, Ends Fade), was then run in **DaVinci Resolve Studio 21.1** on
 macOS on the Edit page as a 24-frame centred transition at 24 fps
 (2026-10-04): exactly SourceFrom until the switch at the midpoint, frame 12 of
 24, then the bounce and the roll, and the transition's last frame exactly
-SourceTo — no pop. Nothing has been in Vegas, Nuke or Natron, and the Windows
+SourceTo, with no pop. None of it has been in Vegas, Nuke or Natron, and the Windows
 and Linux OpenFX builds have only been compiled and, on Linux, `dlopen`ed on
 Rocky 8: neither has rendered in a host. Where the transition starts is taken
 as the effect's duration back from the frame being rendered (the output's
-frame range if a host reports no duration) — an assumption about the host,
-borne out on Resolve's Edit page.
+frame range if a host reports no duration), which is an assumption about the
+host, borne out on Resolve's Edit page.
 
-[AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
+[AGENTS.md](AGENTS.md) has the full list of what's assumed rather than
 measured, the open questions, and the traps.
 
 <!-- attributions:start -->
