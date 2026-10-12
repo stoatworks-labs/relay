@@ -334,9 +334,9 @@ Linux    /usr/OFX/Plugins/
 ```
 
 In DaVinci Resolve it should appear with the OpenFX video transitions, as
-**Relay** in the **Stoatworks** group (not yet seen there). Drop it on the cut
-between two clips. The outgoing clip
-is A, the incoming clip is B, and the transition's own progress (0 at its start,
+**Relay** in the **Stoatworks** group. It has run in Resolve Studio 21.1 on
+macOS (more on that below). Drop it on the cut between two clips. The outgoing
+clip is A, the incoming clip is B, and the transition's own progress (0 at its start,
 1 at its end) does what the layer's opacity fader does in Resolume: it's the
 coil voltage. With the defaults the relay pulls in half way through (at the
 edit point of a centred transition), so the cut, the bounce and the start of
